@@ -7,6 +7,7 @@ import logging
 import os
 import signal
 import sys
+import json
 
 # Configure TLLM_LOG_LEVEL before importing tensorrt_llm
 # This must happen before any tensorrt_llm imports
@@ -295,8 +296,8 @@ async def init(runtime: DistributedRuntime, config: Config):
 
     connector = None
     logging.info("Initializing NIXL Connect.")
-    connector = nixl_connect.Connector()
-    await connector.initialize()
+#    connector = nixl_connect.Connector()
+#    await connector.initialize()
 
     dump_config(
         config.dump_config_to, {"engine_args": engine_args, "dynamo_args": config}
@@ -325,6 +326,11 @@ async def init(runtime: DistributedRuntime, config: Config):
         runtime_config.max_num_batched_tokens = config.max_num_tokens
         runtime_config.reasoning_parser = config.reasoning_parser
         runtime_config.tool_call_parser = config.tool_call_parser
+        # Use the Python binding helper to set engine-specific runtime data.
+        # set_engine_specific expects a JSON string so serialize the value first.
+        runtime_config.set_engine_specific(
+            "disaggregation_mode", json.dumps(config.disaggregation_mode.value)
+        )
 
         logging.info(f"Set runtime config max_num_seqs: {runtime_config.max_num_seqs}")
         logging.info(
@@ -369,6 +375,9 @@ async def init(runtime: DistributedRuntime, config: Config):
                 migration_limit=config.migration_limit,
                 runtime_config=runtime_config,
                 custom_template_path=config.custom_jinja_template,
+            )
+            logging.info(
+                f"Registered model {config.served_model_name} with endpoint {config.endpoint} and runtime config {runtime_config}"
             )
 
         # Get health check payload (checks env var and falls back to TensorRT-LLM default)
