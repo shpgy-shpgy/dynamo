@@ -520,12 +520,12 @@ impl WorkerSelector for DefaultWorkerSelector {
                     .unwrap_or(&(potential_prefill_block.floor() as usize))
                     as f64;
 
-                // Use override if provided, otherwise use default config
-                let overlap_weight = request
-                    .router_config_override
-                    .as_ref()
-                    .and_then(|cfg| cfg.overlap_score_weight)
-                    .unwrap_or(self.kv_router_config.overlap_score_weight);
+            // Use override if provided, otherwise use default config
+            let overlap_weight = request
+                .router_config_override
+                .as_ref()
+                .and_then(|cfg| cfg.overlap_score_weight)
+                .unwrap_or(self.kv_router_config.overlap_score_weight);
 
                 // Calculate logit (lower is better)
                 let mut logit = overlap_weight * potential_prefill_block + decode_block;
@@ -551,6 +551,21 @@ impl WorkerSelector for DefaultWorkerSelector {
                     logit = logit + isl_blocks;
                 }
                 
+            let is_pd_separated: bool = workers
+                .get(worker_id)
+                .and_then(|cfg| cfg.as_ref())
+                .map(|cfg| cfg.runtime_data.get("disaggregation_mode") != Some(&serde_json::Value::from("prefill_and_decode")))
+                .unwrap_or(false); // 默认为 false，如果没有配置
+            
+            if is_pd_separated {
+                // compute remaining capacity up to max_isl_blocks, avoid negative values
+                isl_blocks = (max_isl_blocks - isl_blocks).max(0.0);
+                logit = logit + isl_blocks;
+            } else {
+                isl_blocks = isl_blocks.min(max_isl_blocks);
+                logit = logit + isl_blocks;
+            }
+            
 
                 max_logit = max_logit.max(logit);
 
