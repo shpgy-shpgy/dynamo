@@ -525,25 +525,27 @@ impl WorkerSelector for DefaultWorkerSelector {
                 .unwrap_or(1024) as f64)
                 / block_size as f64; // Max ISL tokens considered for cost calculation
 
-            let is_pd_separated: bool = workers
-                .get(worker_id)
-                .and_then(|cfg| cfg.as_ref())
-                .map(|cfg| cfg.runtime_data.get("disaggregation_mode") != Some(&serde_json::Value::from("prefill_and_decode")))
-                .unwrap_or(false); // 默认为 false，如果没有配置
-            
-            if is_pd_separated {
-                // compute remaining capacity up to max_isl_blocks, avoid negative values
-                isl_blocks = (max_isl_blocks - isl_blocks).max(0.0);
-                logit = logit + isl_blocks;
+            let use_isl_threshold: bool = env::var("USE_ISL_THRESHOLD").unwrap_or_else(|_| "false".into()).to_lowercase() == "true";
+            if use_isl_threshold{
+                let isl_threshold: f64 = (env::var ("ISL_THRESHOLD")
+                    .unwrap_or_else(|_| "1024". to_string())
+                    .parse::<u16>()
+                    .unwrap_or(1024) as f64); // Max ISL tokens considered for cost calculation
+                let is_pd_separated: bool = workers
+                    .get(worker_id)
+                    .and_then(|cfg| cfg.as_ref())
+                    .map(|cfg| cfg.runtime_data.get("disaggregation_mode") != Some(&serde_json::Value::from("prefill_and_decode")))
+                    .unwrap_or(false); // 默认为 false，如果没有配置
+
+                if !is_pd_separated && isl < isl_threshold {
+                    worker_logits.insert(*worker_id, logit);
+                } else if is_pd_separated && isl >= isl_threshold {
+                    worker_logits.insert(*worker_id, logit);
+                }
             } else {
-                isl_blocks = isl_blocks.min(max_isl_blocks);
-                logit = logit + isl_blocks;
+                worker_logits.insert(*worker_id, logit);
             }
-            
-
             max_logit = max_logit.max(logit);
-
-            worker_logits.insert(*worker_id, logit);
 
             tracing::info!(
                 "Formula for {worker_id} with {overlap} cached blocks: {logit:.3} \
