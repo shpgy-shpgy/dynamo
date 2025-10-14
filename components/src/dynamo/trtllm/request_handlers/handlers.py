@@ -4,6 +4,7 @@
 import os
 import copy
 import logging
+import asyncio
 
 from dynamo._core import Context
 from dynamo.runtime.logging import configure_dynamo_logging
@@ -241,6 +242,18 @@ class DecodeHandler(HandlerBase):
 
     async def generate(self, request: dict, context: Context):
         logging.debug(f"New Request ID: {context.id()}")
+        
+        logging.info("request prefill locally, request: {}".format(request))
+        logging.info("disaggregation_mode: {}".format(self.disaggregation_mode))
+        logging.info("short prefill threshold: {}".format(self.short_prefill_threshold))
+        
+        prefill_response = None
+        # If operating under decode_first strategy, the decode handler needs to trigger
+        # the prefill handler.
+        response_count = 0
+        # Do not yield the prefill response directly.
+        # Instead, capture it and extract the state.
+        
         use_conditional_disaggregation = self.use_conditional_disaggregation
         if self.disaggregation_strategy == DisaggregationStrategy.DECODE_FIRST:
             
@@ -253,33 +266,31 @@ class DecodeHandler(HandlerBase):
             threshold = self.short_prefill_threshold
             logging.info("isl_token: {} threshold: {}".format(isl_tokens, threshold))
             if isl_tokens <= threshold and use_conditional_disaggregation:
-                self.disaggregation_mode = DisaggregationMode.AGGREGATED
+                # Short prefill, handled locally
+                logging.info("Short prefill, handled locally")
             else:
-                prefill_response = None
-                # If operating under decode_first strategy, the decode handler needs to trigger
-                # the prefill handler.
-                response_count = 0
-                # Do not yield the prefill response directly.
-                # Instead, capture it and extract the state.
                 async for res in self.remote_prefill(request, context):
                     prefill_response = res
                     response_count += 1
                     if response_count > 1:
                         raise ValueError("Prefill response should be generated only once.")
 
-                if context.is_stopped() or context.is_killed():
-                    logging.debug(f"Aborted Remote Request ID: {context.id()}")
-                    return
+            if context.is_stopped() or context.is_killed():
+                logging.debug(f"Aborted Remote Request ID: {context.id()}")
+                return
 
-                response_data = (
-                    prefill_response.data() if prefill_response is not None else None
+            response_data = (
+                prefill_response.data() if prefill_response is not None else None
+            )
+            if prefill_response is not None and self.check_error(response_data):
+                logging.error(
+                    f"Error in prefill response: {response_data.get('error')}"
                 )
-                if prefill_response is not None and self.check_error(response_data):
-                    yield response_data
-                    return
-
+                logging.info("No Prefill worker, handling prefill locally")
+            else:
                 if prefill_response is not None and response_data is not None:
                     request["disaggregated_params"] = response_data["disaggregated_params"]
+                    logging.info("decode handler passing disaggregated_params to decode: {}".format(request["disaggregated_params"]))
 
         async for res in self.generate_locally(request, context):
             yield res
