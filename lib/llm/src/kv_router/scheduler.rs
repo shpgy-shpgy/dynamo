@@ -9,10 +9,10 @@ use dynamo_runtime::traits::events::EventPublisher;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, watch};
-use std::env;
 
 use super::KV_HIT_RATE_SUBJECT;
 use super::KvRouterConfig;
@@ -462,12 +462,24 @@ fn softmax_sample(logits: &HashMap<WorkerWithDpRank, f64>, temperature: f64) -> 
 #[derive(Debug, Clone, Default)]
 pub struct DefaultWorkerSelector {
     pub kv_router_config: KvRouterConfig,
+    use_isl_threshold: bool,
+    isl_threshold: f64,
 }
 
 impl DefaultWorkerSelector {
     pub fn new(kv_router_config: Option<KvRouterConfig>) -> Self {
+        let use_isl_threshold = env::var("KV_ROUTER_USE_ISL_THRESHOLD")
+            .unwrap_or_else(|_| "false".into())
+            .to_lowercase()
+            == "true";
+        let isl_threshold: f64 = env::var("KV_ROUTER_ISL_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(1024.0);
         Self {
             kv_router_config: kv_router_config.unwrap_or_default(),
+            use_isl_threshold,
+            isl_threshold,
         }
     }
 }
@@ -520,67 +532,40 @@ impl WorkerSelector for DefaultWorkerSelector {
                     .unwrap_or(&(potential_prefill_block.floor() as usize))
                     as f64;
 
-            // Use override if provided, otherwise use default config
-            let overlap_weight = request
-                .router_config_override
-                .as_ref()
-                .and_then(|cfg| cfg.overlap_score_weight)
-                .unwrap_or(self.kv_router_config.overlap_score_weight);
-
-            // Calculate logit (lower is better)
-            let logit = overlap_weight * potential_prefill_block + decode_block;
+                // Use override if provided, otherwise use default config
+                let overlap_weight = request
+                    .router_config_override
+                    .as_ref()
+                    .and_then(|cfg| cfg.overlap_score_weight)
+                    .unwrap_or(self.kv_router_config.overlap_score_weight);
 
                 // Calculate logit (lower is better)
-                let mut logit = overlap_weight * potential_prefill_block + decode_block;
-                let mut isl_blocks: f64 = isl as f64 / block_size as f64;
-                let max_isl_blocks: f64 = (env::var("MAX_ISL_TOKENS")
-                    .unwrap_or_else(|_| "1024".to_string())
-                    .parse::<u16>()
-                    .unwrap_or(1024) as f64)
-                    / block_size as f64; // Max ISL tokens considered for cost calculation
+                let logit = overlap_weight * potential_prefill_block + decode_block;
 
-                let is_pd_separated: bool = workers
-                    .get(worker_id)
-                    .and_then(|cfg| cfg.as_ref())
-                    .map(|cfg| cfg.runtime_data.get("disaggregation_mode") != Some(&serde_json::Value::from("prefill_and_decode")))
-                    .unwrap_or(false); // 默认为 false，如果没有配置
-                
-                if is_pd_separated {
-                    // compute remaining capacity up to max_isl_blocks, avoid negative values
-                    isl_blocks = (max_isl_blocks - isl_blocks).max(0.0);
-                    logit = logit + isl_blocks;
+                if self.use_isl_threshold {
+                    let is_pd_separated: bool = workers
+                        .get(worker_id)
+                        .and_then(|cfg| cfg.as_ref())
+                        .map(|cfg| {
+                            cfg.runtime_data.get("disaggregation_mode")
+                                != Some(&serde_json::Value::from("prefill_and_decode"))
+                        })
+                        .unwrap_or(false); // Default to false if no configuration
+
+                    if (!is_pd_separated && isl < self.isl_threshold as usize)
+                        || (is_pd_separated && isl >= self.isl_threshold as usize)
+                    {
+                        worker_logits.insert(worker, logit);
+                    }
                 } else {
-                    isl_blocks = isl_blocks.min(max_isl_blocks);
-                    logit = logit + isl_blocks;
+                    worker_logits.insert(worker, logit);
                 }
-                
-            let use_isl_threshold: bool = env::var("KV_ROUTER_USE_ISL_THRESHOLD").unwrap_or_else(|_| "false".into()).to_lowercase() == "true";
-            if use_isl_threshold{
-                let isl_threshold: f64 = env::var ("KV_ROUTER_ISL_THRESHOLD")
-                    .unwrap_or_else(|_| "1024". to_string())
-                    .parse::<u16>()
-                    .unwrap_or(1024) as f64; // Max ISL tokens considered for cost calculation
-                let is_pd_separated: bool = workers
-                    .get(worker_id)
-                    .and_then(|cfg| cfg.as_ref())
-                    .map(|cfg| cfg.runtime_data.get("disaggregation_mode") != Some(&serde_json::Value::from("prefill_and_decode")))
-                    .unwrap_or(false); // 默认为 false，如果没有配置
-
-                if !is_pd_separated && isl  < isl_threshold as usize{
-                    worker_logits.insert(*worker_id, logit);
-                } else if is_pd_separated && isl  >= isl_threshold as usize{
-                    worker_logits.insert(*worker_id, logit);
-                }
-            } else {
-                worker_logits.insert(*worker_id, logit);
-            }
-            max_logit = max_logit.max(logit);
+                max_logit = max_logit.max(logit);
 
                 tracing::info!(
                     "Formula for worker_id={} dp_rank={:?} with {overlap} cached blocks: {logit:.3} \
-                     = {overlap_weight:.1} * prefill_blocks + decode_blocks + isl_blocks \
-                     = {overlap_weight:.1} * {potential_prefill_block:.3} + {decode_block:.3} + {isl_blocks:.3} \
-                 ",
+                     = {overlap_weight:.1} * prefill_blocks + decode_blocks \
+                     = {overlap_weight:.1} * {potential_prefill_block:.3} + {decode_block:.3}",
                     worker.worker_id,
                     worker.dp_rank
                 );
