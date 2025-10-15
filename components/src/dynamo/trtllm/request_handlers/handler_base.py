@@ -203,9 +203,9 @@ class HandlerBase:
         if (
             self.disaggregation_mode == DisaggregationMode.DECODE
             and disaggregated_params is None
+            and "conditional_disaggregation" not in request
         ):
-            # Prefill in local Decode worker
-            logging.info("Decode worker missing disaggregated_params, performing local prefill")
+            raise ValueError("Disaggregated params are required for decode mode")
 
         num_output_tokens_so_far = 0
 

@@ -9,10 +9,10 @@ use dynamo_runtime::traits::events::EventPublisher;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, watch};
-use std::env;
 
 use super::KV_HIT_RATE_SUBJECT;
 use super::KvRouterConfig;
@@ -462,12 +462,24 @@ fn softmax_sample(logits: &HashMap<i64, f64>, temperature: f64) -> i64 {
 #[derive(Debug, Clone, Default)]
 pub struct DefaultWorkerSelector {
     pub kv_router_config: KvRouterConfig,
+    use_isl_threshold: bool,
+    isl_threshold: f64,
 }
 
 impl DefaultWorkerSelector {
     pub fn new(kv_router_config: Option<KvRouterConfig>) -> Self {
+        let use_isl_threshold = env::var("KV_ROUTER_USE_ISL_THRESHOLD")
+            .unwrap_or_else(|_| "false".into())
+            .to_lowercase()
+            == "true";
+        let isl_threshold: f64 = env::var("KV_ROUTER_ISL_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(1024.0);
         Self {
             kv_router_config: kv_router_config.unwrap_or_default(),
+            use_isl_threshold,
+            isl_threshold,
         }
     }
 }
@@ -519,21 +531,19 @@ impl WorkerSelector for DefaultWorkerSelector {
             // Calculate logit (lower is better)
             let logit = overlap_weight * potential_prefill_block + decode_block;
 
-            let use_isl_threshold: bool = env::var("KV_ROUTER_USE_ISL_THRESHOLD").unwrap_or_else(|_| "false".into()).to_lowercase() == "true";
-            if use_isl_threshold{
-                let isl_threshold: f64 = env::var ("KV_ROUTER_ISL_THRESHOLD")
-                    .unwrap_or_else(|_| "1024". to_string())
-                    .parse::<u16>()
-                    .unwrap_or(1024) as f64; // Max ISL tokens considered for cost calculation
+            if self.use_isl_threshold {
                 let is_pd_separated: bool = workers
                     .get(worker_id)
                     .and_then(|cfg| cfg.as_ref())
-                    .map(|cfg| cfg.runtime_data.get("disaggregation_mode") != Some(&serde_json::Value::from("prefill_and_decode")))
-                    .unwrap_or(false); // 默认为 false，如果没有配置
+                    .map(|cfg| {
+                        cfg.runtime_data.get("disaggregation_mode")
+                            != Some(&serde_json::Value::from("prefill_and_decode"))
+                    })
+                    .unwrap_or(false); // Default to false if no configuration
 
-                if !is_pd_separated && isl  < isl_threshold as usize{
-                    worker_logits.insert(*worker_id, logit);
-                } else if is_pd_separated && isl  >= isl_threshold as usize{
+                if (!is_pd_separated && isl < self.isl_threshold as usize)
+                    || (is_pd_separated && isl >= self.isl_threshold as usize)
+                {
                     worker_logits.insert(*worker_id, logit);
                 }
             } else {
