@@ -554,9 +554,9 @@ impl WorkerSelector for DefaultWorkerSelector {
                     logit = logit + isl_blocks;
                 }
                 
-            let use_isl_threshold: bool = env::var("USE_ISL_THRESHOLD").unwrap_or_else(|_| "false".into()).to_lowercase() == "true";
+            let use_isl_threshold: bool = env::var("KV_ROUTER_USE_ISL_THRESHOLD").unwrap_or_else(|_| "false".into()).to_lowercase() == "true";
             if use_isl_threshold{
-                let isl_threshold: f64 = env::var ("ISL_THRESHOLD")
+                let isl_threshold: f64 = env::var ("KV_ROUTER_ISL_THRESHOLD")
                     .unwrap_or_else(|_| "1024". to_string())
                     .parse::<u16>()
                     .unwrap_or(1024) as f64; // Max ISL tokens considered for cost calculation

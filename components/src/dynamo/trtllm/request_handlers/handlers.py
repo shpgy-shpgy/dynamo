@@ -243,19 +243,14 @@ class DecodeHandler(HandlerBase):
     async def generate(self, request: dict, context: Context):
         logging.debug(f"New Request ID: {context.id()}")
         
-        logging.info("request prefill locally, request: {}".format(request))
-        logging.info("disaggregation_mode: {}".format(self.disaggregation_mode))
-        logging.info("short prefill threshold: {}".format(self.short_prefill_threshold))
-        
-        prefill_response = None
-        # If operating under decode_first strategy, the decode handler needs to trigger
-        # the prefill handler.
-        response_count = 0
-        # Do not yield the prefill response directly.
-        # Instead, capture it and extract the state.
-        
         use_conditional_disaggregation = self.use_conditional_disaggregation
         if self.disaggregation_strategy == DisaggregationStrategy.DECODE_FIRST:
+            prefill_response = None
+            # If operating under decode_first strategy, the decode handler needs to trigger
+            # the prefill handler.
+            response_count = 0
+            # Do not yield the prefill response directly.
+            # Instead, capture it and extract the state.
             
             token_ids = request.get("token_ids")
             if isinstance(token_ids, (list, tuple)):
@@ -286,11 +281,10 @@ class DecodeHandler(HandlerBase):
                 logging.error(
                     f"Error in prefill response: {response_data.get('error')}"
                 )
-                logging.info("No Prefill worker, handling prefill locally")
+                logging.info("No Prefill worker available, handling prefill locally")
             else:
                 if prefill_response is not None and response_data is not None:
                     request["disaggregated_params"] = response_data["disaggregated_params"]
-                    logging.info("decode handler passing disaggregated_params to decode: {}".format(request["disaggregated_params"]))
 
         async for res in self.generate_locally(request, context):
             yield res
