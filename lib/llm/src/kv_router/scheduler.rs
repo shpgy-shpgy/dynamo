@@ -519,9 +519,9 @@ impl WorkerSelector for DefaultWorkerSelector {
             // Calculate logit (lower is better)
             let logit = overlap_weight * potential_prefill_block + decode_block;
 
-            let use_isl_threshold: bool = env::var("USE_ISL_THRESHOLD").unwrap_or_else(|_| "false".into()).to_lowercase() == "true";
+            let use_isl_threshold: bool = env::var("KV_ROUTER_USE_ISL_THRESHOLD").unwrap_or_else(|_| "false".into()).to_lowercase() == "true";
             if use_isl_threshold{
-                let isl_threshold: f64 = env::var ("ISL_THRESHOLD")
+                let isl_threshold: f64 = env::var ("KV_ROUTER_ISL_THRESHOLD")
                     .unwrap_or_else(|_| "1024". to_string())
                     .parse::<u16>()
                     .unwrap_or(1024) as f64; // Max ISL tokens considered for cost calculation
@@ -544,8 +544,7 @@ impl WorkerSelector for DefaultWorkerSelector {
             tracing::info!(
                 "Formula for {worker_id} with {overlap} cached blocks: {logit:.3} \
                  = {overlap_weight:.1} * prefill_blocks + decode_blocks \
-                 = {overlap_weight:.1} * {potential_prefill_block:.3} + {decode_block:.3} \
-                 "
+                 = {overlap_weight:.1} * {potential_prefill_block:.3} + {decode_block:.3}"
             );
         }
 
