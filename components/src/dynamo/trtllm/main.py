@@ -7,7 +7,6 @@ import logging
 import os
 import signal
 import sys
-import json
 
 # Configure TLLM_LOG_LEVEL before importing tensorrt_llm
 # This must happen before any tensorrt_llm imports
