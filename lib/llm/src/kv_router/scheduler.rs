@@ -528,6 +528,13 @@ impl WorkerSelector for DefaultWorkerSelector {
                 // this is the number of prefill tokens the worker would have if the request were scheduled there
                 let prefill_token = *prefill_tokens.get(&worker).unwrap_or(&isl);
                 let potential_prefill_block = (prefill_token as f64) / (block_size as f64);
+                tracing::debug!(
+                    "calculated prefill_token: {}",
+                    prefill_tokens
+                        .get(&worker)
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "None".to_string()),
+                );
 
                 // this is the number of decode blocks the worker would have if the request were scheduled there
                 let decode_block = *decode_blocks
