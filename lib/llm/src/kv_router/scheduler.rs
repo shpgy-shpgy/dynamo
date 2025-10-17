@@ -9,9 +9,10 @@ use dynamo_runtime::traits::events::EventPublisher;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::env;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
+use std::{env, f64};
 use tokio::sync::{RwLock, watch};
 
 use super::KV_HIT_RATE_SUBJECT;
@@ -463,7 +464,7 @@ fn softmax_sample(logits: &HashMap<WorkerWithDpRank, f64>, temperature: f64) -> 
 pub struct DefaultWorkerSelector {
     pub kv_router_config: KvRouterConfig,
     use_isl_threshold: bool,
-    isl_threshold: f64,
+    isl_threshold: Arc<Mutex<f64>>,
 }
 
 impl DefaultWorkerSelector {
@@ -472,14 +473,14 @@ impl DefaultWorkerSelector {
             .unwrap_or_else(|_| "false".into())
             .to_lowercase()
             == "true";
-        let isl_threshold: f64 = env::var("KV_ROUTER_ISL_THRESHOLD")
+        let isl_threshold = std::env::var("KV_ROUTER_ISL_THRESHOLD")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(1024.0);
         Self {
             kv_router_config: kv_router_config.unwrap_or_default(),
             use_isl_threshold,
-            isl_threshold,
+            isl_threshold: Arc::new(Mutex::new(isl_threshold)),
         }
     }
 }
@@ -506,6 +507,8 @@ impl WorkerSelector for DefaultWorkerSelector {
 
         let mut worker_logits = HashMap::new();
         let mut max_logit = f64::NEG_INFINITY;
+        let mut max_dp_logit = f64::NEG_INFINITY;
+        let mut max_ifb_logit = f64::NEG_INFINITY;
 
         // Calculate logits for each worker with dp_rank
         // Outer loop: iterate over all workers from runtime config
@@ -552,10 +555,16 @@ impl WorkerSelector for DefaultWorkerSelector {
                         })
                         .unwrap_or(false); // Default to false if no configuration
 
-                    if (!is_pd_separated && isl < self.isl_threshold as usize)
-                        || (is_pd_separated && isl >= self.isl_threshold as usize)
+                    let isl_threshold = *self.isl_threshold.lock().unwrap();
+                    if (!is_pd_separated && isl < isl_threshold as usize)
+                        || (is_pd_separated && isl >= isl_threshold as usize)
                     {
                         worker_logits.insert(worker, logit);
+                    }
+                    if is_pd_separated {
+                        max_dp_logit = max_dp_logit.max(logit);
+                    } else {
+                        max_ifb_logit = max_ifb_logit.max(logit);
                     }
                 } else {
                     worker_logits.insert(worker, logit);
@@ -570,6 +579,20 @@ impl WorkerSelector for DefaultWorkerSelector {
                     worker.dp_rank
                 );
             }
+        }
+        // Dynamically adapt the threshold according to logit values
+        if self.use_isl_threshold {
+            if max_dp_logit > max_ifb_logit + 500.0 {
+                *self.isl_threshold.lock().unwrap() += 100.0;
+            } else if max_ifb_logit > max_dp_logit + 500.0 {
+                *self.isl_threshold.lock().unwrap() -= 100.0;
+            }
+            tracing::info!(
+                "Updated isl_threshold to {:.1} (max_dp_logit: {:.1}, max_ifb_logit: {:.1})",
+                *self.isl_threshold.lock().unwrap(),
+                max_dp_logit,
+                max_ifb_logit
+            );
         }
 
         // Use softmax sampling to select worker
