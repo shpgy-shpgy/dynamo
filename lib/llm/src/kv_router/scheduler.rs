@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::{RwLock, watch};
 
@@ -463,7 +464,7 @@ fn softmax_sample(logits: &HashMap<i64, f64>, temperature: f64) -> i64 {
 pub struct DefaultWorkerSelector {
     pub kv_router_config: KvRouterConfig,
     use_isl_threshold: bool,
-    isl_threshold: f64,
+    isl_threshold: Arc<Mutex<f64>>,
 }
 
 impl DefaultWorkerSelector {
@@ -479,7 +480,7 @@ impl DefaultWorkerSelector {
         Self {
             kv_router_config: kv_router_config.unwrap_or_default(),
             use_isl_threshold,
-            isl_threshold,
+            isl_threshold: Arc::new(Mutex::new(isl_threshold)),
         }
     }
 }
@@ -506,6 +507,8 @@ impl WorkerSelector for DefaultWorkerSelector {
 
         let mut worker_logits = HashMap::new();
         let mut max_logit = f64::NEG_INFINITY;
+        let mut max_dp_logit = f64::NEG_INFINITY;
+        let mut max_ifb_logit = f64::NEG_INFINITY;
 
         // Calculate logits for each worker
         for worker_id in workers.keys() {
@@ -541,10 +544,16 @@ impl WorkerSelector for DefaultWorkerSelector {
                     })
                     .unwrap_or(false); // Default to false if no configuration
 
-                if (!is_pd_separated && isl < self.isl_threshold as usize)
-                    || (is_pd_separated && isl >= self.isl_threshold as usize)
+                let isl_threshold = *self.isl_threshold.lock().unwrap();
+                if (!is_pd_separated && isl < isl_threshold as usize)
+                    || (is_pd_separated && isl >= isl_threshold as usize)
                 {
                     worker_logits.insert(*worker_id, logit);
+                }
+                if is_pd_separated {
+                    max_dp_logit = max_dp_logit.max(logit);
+                } else {
+                    max_ifb_logit = max_ifb_logit.max(logit);
                 }
             } else {
                 worker_logits.insert(*worker_id, logit);
@@ -555,6 +564,20 @@ impl WorkerSelector for DefaultWorkerSelector {
                 "Formula for {worker_id} with {overlap} cached blocks: {logit:.3} \
                  = {overlap_weight:.1} * prefill_blocks + decode_blocks \
                  = {overlap_weight:.1} * {potential_prefill_block:.3} + {decode_block:.3}"
+            );
+        }
+        // Dynamically adapt the threshold according to logit values
+        if self.use_isl_threshold {
+            if max_dp_logit > max_ifb_logit + 100.0 {
+                *self.isl_threshold.lock().unwrap() += 100.0;
+            } else if max_ifb_logit > max_dp_logit + 100.0 {
+                *self.isl_threshold.lock().unwrap() -= 100.0;
+            }
+            tracing::info!(
+                "Updated isl_threshold to {:.1} (max_dp_logit: {:.1}, max_ifb_logit: {:.1})",
+                *self.isl_threshold.lock().unwrap(),
+                max_dp_logit,
+                max_ifb_logit
             );
         }
 
