@@ -499,11 +499,11 @@ impl DefaultWorkerSelector {
                 if next.is_nan() {
                     next = cur;
                 }
-                if next < 1000.0 {
-                    next = 1000.0;
+                if next < 1.0 {
+                    next = 1.0;
                 }
-                if next > 3000.0 {
-                    next = 3000.0;
+                if next > 4000.0 {
+                    next = 4000.0;
                 }
                 Some(next.to_bits())
             });
