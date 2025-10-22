@@ -470,7 +470,7 @@ pub struct DefaultWorkerSelector {
 impl DefaultWorkerSelector {
     pub fn new(kv_router_config: Option<KvRouterConfig>) -> Self {
         let use_isl_threshold = env::var("KV_ROUTER_USE_ISL_THRESHOLD")
-            .unwrap_or_else(|_| "false".into())
+            .unwrap_or_else(|_| "true".into())
             .to_lowercase()
             == "true";
         let isl_threshold: f64 = env::var("KV_ROUTER_ISL_THRESHOLD")
@@ -479,7 +479,7 @@ impl DefaultWorkerSelector {
             .unwrap_or(1024.0);
         Self {
             kv_router_config: kv_router_config.unwrap_or_default(),
-            use_isl_threshold,
+            use_isl_threshold: true,
             isl_threshold: Arc::new(AtomicU64::new(isl_threshold.to_bits())),
         }
     }
