@@ -531,6 +531,7 @@ impl WorkerSelector for DefaultWorkerSelector {
         let prefill_tokens = &request.prefill_tokens;
 
         let mut worker_logits = HashMap::new();
+        let mut other_worker_logits = HashMap::new();
         let mut max_logit = f64::NEG_INFINITY;
         let mut max_dp_logit = f64::NEG_INFINITY;
         let mut max_ifb_logit = f64::NEG_INFINITY;
@@ -574,6 +575,8 @@ impl WorkerSelector for DefaultWorkerSelector {
                     || (is_pd_separated && isl >= isl_threshold as usize)
                 {
                     worker_logits.insert(*worker_id, logit);
+                } else {
+                    other_worker_logits.insert(*worker_id, logit);
                 }
                 if is_pd_separated {
                     max_dp_logit = max_dp_logit.max(decode_block);
@@ -590,6 +593,9 @@ impl WorkerSelector for DefaultWorkerSelector {
                  = {overlap_weight:.1} * prefill_blocks + decode_blocks \
                  = {overlap_weight:.1} * {potential_prefill_block:.3} + {decode_block:.3}"
             );
+        }
+        if self.use_isl_threshold && worker_logits.is_empty() {
+            worker_logits = other_worker_logits;
         }
         // Dynamically adapt the threshold according to logit values
         let gap = max_dp_logit - max_ifb_logit * 2.0;
