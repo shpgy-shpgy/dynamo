@@ -508,6 +508,13 @@ impl WorkerSelector for DefaultWorkerSelector {
                 // this is the number of prefill tokens the worker would have if the request were scheduled there
                 let prefill_token = *prefill_tokens.get(&worker).unwrap_or(&isl);
                 let potential_prefill_block = (prefill_token as f64) / (block_size as f64);
+                tracing::debug!(
+                    "calculated prefil_token: {}",
+                    prefill_tokens
+                        .get(&worker)
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "N/A".to_string()),
+                );
 
                 // this is the number of decode blocks the worker would have if the request were scheduled there
                 let decode_block = *decode_blocks
@@ -543,7 +550,7 @@ impl WorkerSelector for DefaultWorkerSelector {
         let temperature = request
             .router_config_override
             .as_ref()
-            .and_then(|cfg| cfg.router_temperature)
+            .and_then(|cfg: &RouterConfigOverride| cfg.router_temperature)
             .unwrap_or(self.kv_router_config.router_temperature);
         let candidates = softmax_sample(&worker_logits, temperature);
 
