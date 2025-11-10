@@ -6,6 +6,7 @@ import logging
 import os
 import signal
 import sys
+import json
 
 import uvloop
 from tensorrt_llm import SamplingParams
@@ -268,6 +269,9 @@ async def init(runtime: DistributedRuntime, config: Config):
 
         runtime_config.reasoning_parser = config.reasoning_parser
         runtime_config.tool_call_parser = config.tool_call_parser
+        runtime_config.set_engine_specific(
+            "disaggregation_mode", json.dumps(config.disaggregation_mode.value)
+        )
 
         # publisher will be set later if publishing is enabled.
         handler_config = RequestHandlerConfig(
