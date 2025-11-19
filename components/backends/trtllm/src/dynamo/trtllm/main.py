@@ -272,6 +272,7 @@ async def init(runtime: DistributedRuntime, config: Config):
         runtime_config.set_engine_specific(
             "disaggregation_mode", json.dumps(config.disaggregation_mode.value)
         )
+        # print("********Setting runtime config:", runtime_config.runtime_data)
 
         # publisher will be set later if publishing is enabled.
         handler_config = RequestHandlerConfig(
@@ -302,6 +303,7 @@ async def init(runtime: DistributedRuntime, config: Config):
                 config.served_model_name,
                 kv_cache_block_size=config.kv_block_size,
                 migration_limit=config.migration_limit,
+                runtime_config=runtime_config,
             )
 
         if config.publish_events_and_metrics and is_first_worker(config):

@@ -7,9 +7,7 @@ use dynamo_runtime::traits::events::EventPublisher;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::env;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -362,50 +360,13 @@ fn softmax_sample(logits: &HashMap<i64, f64>, temperature: f64) -> i64 {
 #[derive(Debug, Clone, Default)]
 pub struct DefaultWorkerSelector {
     pub kv_router_config: KvRouterConfig,
-    use_isl_threshold: bool,
-    isl_threshold: Arc<AtomicU64>,
 }
 
 impl DefaultWorkerSelector {
     pub fn new(kv_router_config: Option<KvRouterConfig>) -> Self {
-        let use_isl_threshold = env::var("KV_ROUTER_USE_ISL_THRESHOLD")
-            .unwrap_or_else(|_| "false".into())
-            .to_lowercase()
-            == "true";
-        let isl_threshold: f64 = env::var("KV_ROUTER_ISL_THRESHOLD")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(1024.0);
         Self {
             kv_router_config: kv_router_config.unwrap_or_default(),
-            use_isl_threshold,
-            isl_threshold: Arc::new(AtomicU64::new(isl_threshold.to_bits())),
         }
-    }
-
-    fn load_isl_threshold(&self) -> f64 {
-        f64::from_bits(self.isl_threshold.load(Ordering::Relaxed))
-    }
-
-    fn adjust_isl_threshold(&self, delta: f64) {
-        let step = delta.signum() * delta.abs().min(128.0).max(1.0_f64);
-        let _ = self
-            .isl_threshold
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
-                let cur = f64::from_bits(bits);
-                let mut next = cur + step;
-                // clamp to reasonable range
-                if next.is_nan() {
-                    next = cur;
-                }
-                if next < 1000.0 {
-                    next = 1000.0;
-                }
-                if next > 4000.0 {
-                    next = 4000.0;
-                }
-                Some(next.to_bits())
-            });
     }
 }
 
@@ -432,9 +393,8 @@ impl WorkerSelector for DefaultWorkerSelector {
         let mut worker_logits = HashMap::new();
         let mut other_worker_logits = HashMap::new();
         let mut max_logit = f64::NEG_INFINITY;
-        let mut max_dp_logit = f64::NEG_INFINITY;
-        let mut max_ifb_logit = f64::NEG_INFINITY;
 
+        let rand_select = rand::rng().random_bool(0.0);
         // Calculate logits for each worker
         for worker_id in workers.keys() {
             let overlap = *overlaps.get(worker_id).unwrap_or(&0);
@@ -458,32 +418,41 @@ impl WorkerSelector for DefaultWorkerSelector {
 
             // Calculate logit (lower is better)
             let logit = overlap_weight * potential_prefill_block + decode_block;
-            if self.use_isl_threshold {
-                let is_pd_separated: bool = workers
-                    .get(worker_id)
-                    .and_then(|cfg| cfg.as_ref())
-                    .map(|cfg| {
-                        cfg.runtime_data.get("disaggregation_mode")
-                            != Some(&serde_json::Value::from("prefill_and_decode"))
-                    })
-                    .unwrap_or(false); // Default to false if no configuration
+            let is_pd_separated: bool = workers
+                .get(worker_id)
+                .and_then(|cfg| cfg.as_ref())
+                .map(|cfg| {
+                    cfg.runtime_data.get("disaggregation_mode")
+                        != Some(&serde_json::Value::from("prefill_and_decode"))
+                })
+                .unwrap_or(false); // Default to false if no configuration
 
-                let isl_threshold = self.load_isl_threshold();
-                if (!is_pd_separated && isl < isl_threshold as usize)
-                    || (is_pd_separated && isl >= isl_threshold as usize)
-                {
-                    worker_logits.insert(*worker_id, logit);
-                } else {
-                    other_worker_logits.insert(*worker_id, logit);
-                }
-                if is_pd_separated {
-                    max_dp_logit = max_dp_logit.max(decode_block);
-                } else {
-                    max_ifb_logit = max_ifb_logit.max(logit);
-                }
-            } else {
+            if rand_select && is_pd_separated {
                 worker_logits.insert(*worker_id, logit);
+                tracing::info!(
+                    "Randomly selecting worker {} due to PD separation with {}.",
+                    worker_id,
+                    workers
+                        .get(worker_id)
+                        .and_then(|cfg| cfg.as_ref())
+                        .map(|cfg| format!("{:?}", cfg))
+                        .unwrap_or_else(|| "None".to_string()),
+                );
+            } else if !rand_select && !is_pd_separated {
+                worker_logits.insert(*worker_id, logit);
+                tracing::info!(
+                    "Randomly selecting worker {} without PD separation with {}.",
+                    worker_id,
+                    workers
+                        .get(worker_id)
+                        .and_then(|cfg| cfg.as_ref())
+                        .map(|cfg| format!("{:?}", cfg))
+                        .unwrap_or_else(|| "None".to_string()),
+                );
+            } else {
+                other_worker_logits.insert(*worker_id, logit);
             }
+
             max_logit = max_logit.max(logit);
 
             tracing::info!(
@@ -492,23 +461,8 @@ impl WorkerSelector for DefaultWorkerSelector {
                  = {overlap_weight:.1} * {potential_prefill_block:.3} + {decode_block:.3}"
             );
         }
-        if self.use_isl_threshold && worker_logits.is_empty() {
+        if worker_logits.is_empty() {
             worker_logits = other_worker_logits;
-        }
-        // Dynamically adapt the threshold according to logit values
-        let gap = max_dp_logit - max_ifb_logit * 2.0;
-        let scale = 0.01;
-        let delta = gap * scale;
-        if self.use_isl_threshold {
-            if delta.abs() > 2.0 {
-                self.adjust_isl_threshold(delta * delta.abs());
-                tracing::debug!(
-                    "Updated isl_threshold to {:.1} (max_dp_logit: {:.1}, max_ifb_logit: {:.1})",
-                    self.load_isl_threshold(),
-                    max_dp_logit,
-                    max_ifb_logit
-                );
-            }
         }
 
         // Use softmax sampling to select worker
