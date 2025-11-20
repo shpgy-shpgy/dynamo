@@ -467,6 +467,7 @@ impl WorkerSelector for DefaultWorkerSelector {
                             != Some(&serde_json::Value::from("prefill_and_decode"))
                     })
                     .unwrap_or(false); // Default to false if no configuration
+                // tracing::debug!("is_pd_separated for {worker_id}: {is_pd_separated}");
 
                 let isl_threshold = self.load_isl_threshold();
                 if (!is_pd_separated && isl < isl_threshold as usize)
