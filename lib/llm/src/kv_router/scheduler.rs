@@ -360,12 +360,18 @@ fn softmax_sample(logits: &HashMap<i64, f64>, temperature: f64) -> i64 {
 #[derive(Debug, Clone, Default)]
 pub struct DefaultWorkerSelector {
     pub kv_router_config: KvRouterConfig,
+    pub rand_threshold: f64,
 }
 
 impl DefaultWorkerSelector {
     pub fn new(kv_router_config: Option<KvRouterConfig>) -> Self {
+        let rand_threshold = std::env::var("KV_ROUTER_RANDOM_THRESHOLD")
+            .ok()
+            .and_then(|val| val.parse::<f64>().ok())
+            .unwrap_or(1.0);
         Self {
             kv_router_config: kv_router_config.unwrap_or_default(),
+            rand_threshold: rand_threshold,
         }
     }
 }
@@ -394,7 +400,7 @@ impl WorkerSelector for DefaultWorkerSelector {
         let mut other_worker_logits = HashMap::new();
         let mut max_logit = f64::NEG_INFINITY;
 
-        let rand_select = rand::rng().random_bool(0.0);
+        let rand_select = rand::rng().random_bool(self.rand_threshold);
         // Calculate logits for each worker
         for worker_id in workers.keys() {
             let overlap = *overlaps.get(worker_id).unwrap_or(&0);
