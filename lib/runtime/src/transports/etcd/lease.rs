@@ -97,7 +97,7 @@ async fn keep_alive(
                 status = heartbeat_receiver.message() => {
                     match status {
                         Ok(Some(resp)) => {
-                            tracing::trace!(lease_id, "keep alive response received: {:?}", resp);
+                            // tracing::trace!(lease_id, "keep alive response received: {:?}", resp);
 
                             // Update ttl and deadline from response
                             ttl = resp.ttl() as u64;

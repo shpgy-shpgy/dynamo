@@ -195,7 +195,7 @@ where
 
         // extend request with context
         tracing::trace!("received control message: {:?}", control_msg);
-        tracing::trace!("received request: {:?}", request);
+        tracing::trace!("received request: 03" );
         let request: context::Context<T> = Context::with_id(request, control_msg.id);
 
         // todo - eventually have a handler class which will returned an abstracted object, but for now,

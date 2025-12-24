@@ -759,7 +759,7 @@ async fn chat_completions(
             request.inner.max_completion_tokens = Some(template.max_completion_tokens);
         }
     }
-    tracing::trace!("Received chat completions request: {:?}", request.content());
+    tracing::trace!("Received chat completions request 01");
 
     // todo - decide on default
     let streaming = request.inner.stream.unwrap_or(false);
@@ -1018,7 +1018,7 @@ async fn responses(
             request.inner.max_output_tokens = Some(template.max_completion_tokens);
         }
     }
-    tracing::trace!("Received chat completions request: {:?}", request.inner);
+    tracing::trace!("Received chat completions request: 02");
 
     let request_id = request.id().to_string();
     let (request, context) = request.into_parts();

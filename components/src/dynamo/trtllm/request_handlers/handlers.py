@@ -107,7 +107,7 @@ class PrefillHandler(HandlerBase):
         Frontend routes to decode workers automatically.
         """
         logging.debug(f"Prefill Request ID: {context.id()}")
-        logging.debug(f"PrefillHandler.generate received request: {request}")
+        # logging.debug(f"PrefillHandler.generate received request: {request}")
         embeddings_tensor = None
 
         if self.multimodal_processor:

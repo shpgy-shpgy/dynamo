@@ -34,7 +34,7 @@ cuda_graph_config:
   - 96
   - 128
 
-print_iter_log: true
+print_iter_log: false
 
 scheduler_config:
   capacity_scheduler_policy: MAX_UTILIZATION

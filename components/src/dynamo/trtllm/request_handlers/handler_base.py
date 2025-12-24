@@ -178,7 +178,7 @@ class HandlerBase:
             context: Context object for cancellation handling
             embeddings: Optional tensor or dict containing embeddings for multimodal processing
         """
-        logging.debug(f"Request: {request}")
+        # logging.debug(f"Request: {request}")
 
         # Default to text-based input. This will be overwritten if multimodal
         # content is found and processed.
