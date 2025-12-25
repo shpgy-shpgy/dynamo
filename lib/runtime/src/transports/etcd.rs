@@ -19,8 +19,9 @@ use async_nats::jetstream::kv;
 use derive_builder::Builder;
 use derive_getters::Dissolve;
 use futures::StreamExt;
-use std::collections::HashMap;
+use rand::rand_core::le;
 use std::sync::Arc;
+use std::{collections::HashMap, env};
 use tokio::sync::{RwLock, mpsc};
 use validator::Validate;
 
@@ -49,6 +50,7 @@ pub struct Client {
     primary_lease: i64,
     runtime: Runtime,
     rt: Arc<tokio::runtime::Runtime>,
+    watch_buffer_size: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -131,11 +133,17 @@ impl Client {
         )
         .await?;
 
+        let watch_buffer_size = env::var("ETCD_WATCH_BUFFER_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(128);
+
         Ok(Client {
             client,
             primary_lease: lease_id,
             rt,
             runtime,
+            watch_buffer_size,
         })
     }
 
@@ -366,8 +374,9 @@ impl Client {
 
         let kvs = get_response.take_kvs();
         tracing::trace!("initial kv count: {:?}", kvs.len());
+        tracing::debug!("fix correct to {:?}", self.watch_buffer_size);
 
-        let (tx, rx) = mpsc::channel(32);
+        let (tx, rx) = mpsc::channel(self.watch_buffer_size);
 
         self.rt.spawn(async move {
             for kv in kvs {
