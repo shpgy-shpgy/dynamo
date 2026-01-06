@@ -17,6 +17,7 @@ import asyncio
 import copy
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -179,6 +180,7 @@ class HandlerBase:
             embeddings: Optional tensor or dict containing embeddings for multimodal processing
         """
         logging.debug(f"Request: {request}")
+        t0 = time.perf_counter()
 
         # Default to text-based input. This will be overwritten if multimodal
         # content is found and processed.
@@ -193,6 +195,9 @@ class HandlerBase:
         else:
             # text-only flow
             processed_input = request.get("token_ids")
+        
+        t1 = time.perf_counter()
+        print(f"************Input processing time: {(t1 - t0)*1000:.4f} ms")
 
         # Check if there is an error in the publisher error queue
         publishers_error = (
@@ -258,6 +263,10 @@ class HandlerBase:
             adapters = create_trtllm_adapters(processors)
             sampling_params.logits_processor = adapters
 
+        
+        t2 = time.perf_counter()
+        print(f"************Sampling params setup time: {(t2 - t1)*1000:.4f} ms")
+        
         try:
             # NEW: Updated engine call to include multimodal data
             generation_result = self.engine.llm.generate_async(
@@ -318,6 +327,9 @@ class HandlerBase:
                     # Yield the chunk to the client and update the token count for the next iteration.
                     yield out
                     num_output_tokens_so_far = next_total_toks
+            
+            t3 = time.perf_counter()
+            print(f"************Generation time: {(t3 - t2)*1000:.4f} ms")
 
         # 1. Client cancellation - don't shutdown
         except asyncio.CancelledError:

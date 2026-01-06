@@ -268,6 +268,7 @@ async def init(runtime: DistributedRuntime, config: Config):
             tokenizer=tokenizer,
             allowed_local_media_path=config.allowed_local_media_path,
         )
+        # print(f"Initialized MultimodalRequestProcessor for model_type={model_config.model_type}")
 
     else:
         # We already detokenize inside HandlerBase. No need to also do it in TRTLLM.

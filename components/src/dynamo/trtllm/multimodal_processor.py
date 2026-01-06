@@ -17,12 +17,15 @@ import logging
 import time
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, Coroutine
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+from transformers import AutoProcessor
+
 import torch
-from tensorrt_llm.inputs import default_multimodal_input_loader
+from tensorrt_llm.inputs.utils import ConversationMessage, apply_chat_template, MultimodalDataTracker
+from tensorrt_llm.serve.chat_utils import parse_chat_message_content, add_multimodal_placeholders
 
 from dynamo.runtime.logging import configure_dynamo_logging
 
@@ -59,6 +62,9 @@ class MultimodalRequestProcessor:
         self.allowed_local_media_path = allowed_local_media_path
         self.max_file_size_mb = max_file_size_mb
         self.max_file_size_bytes = max_file_size_mb * 1024 * 1024
+        self.processor = AutoProcessor.from_pretrained(self.model_dir,
+                                                  use_fast=True,
+                                                  trust_remote_code=True)
 
     def is_url(self, path: str) -> bool:
         """Check if a path is a URL."""
@@ -165,47 +171,113 @@ class MultimodalRequestProcessor:
         messages = request.get("extra_args", {}).get(
             "messages", request.get("messages", [])
         )
-        text_prompt, image_urls, embedding_paths = self.extract_prompt_and_media(
-            messages
-        )
+        # text_prompt, image_urls, embedding_paths = self.extract_prompt_and_media(
+        #     messages
+        # )
 
-        if not image_urls and not embedding_paths:
-            logging.warning("No multimodal content, returning None")
-            return None
+        # if not image_urls and not embedding_paths:
+        #     logging.warning("No multimodal content, returning None")
+        #     return None
 
-        loader_kwargs = {}
-        if embeddings is not None:
-            # EPD flow
-            loader_kwargs["mm_embeddings"] = [embeddings]
-            logging.debug(f"Using NIXL embeddings in prefill worker: {embeddings}")
-        elif image_urls:
-            # Image-only flow
-            loader_kwargs["media"] = [image_urls]
-        elif embedding_paths:
-            # PD flow with no NIXL and no encoder
-            loader_kwargs["mm_embeddings"] = [
-                self.load_tensor_from_path_or_url(path) for path in embedding_paths
-            ]
-            logging.debug(f"Using embedding paths in prefill worker: {embedding_paths}")
+        # loader_kwargs = {}
+        # if embeddings is not None:
+        #     # EPD flow
+        #     loader_kwargs["mm_embeddings"] = [embeddings]
+        #     logging.debug(f"Using NIXL embeddings in prefill worker: {embeddings}")
+        #     print(f"************Using NIXL embeddings in prefill worker")
+        # elif image_urls:
+        #     # Image-only flow
+        #     loader_kwargs["media"] = [image_urls]
+        #     print(f"************Using image URLs in prefill worker")
+        # elif embedding_paths:
+        #     # PD flow with no NIXL and no encoder
+        #     loader_kwargs["mm_embeddings"] = [
+        #         self.load_tensor_from_path_or_url(path) for path in embedding_paths
+        #     ]
+        #     logging.debug(f"Using embedding paths in prefill worker: {embedding_paths}")
+        #     print(f"************Using embedding paths in prefill worker: {embedding_paths}")
 
-        # Process with default_multimodal_input_loader
-        processed_inputs = default_multimodal_input_loader(
-            tokenizer=None,
-            model_dir=self.model_dir,
-            model_type=self.model_type,
-            modality=self.modality,
-            prompts=[text_prompt],
-            image_data_format="pt",
-            device="cuda",
-            **loader_kwargs,
-        )
+        # # Process with default_multimodal_input_loader
+        # processed_inputs = default_multimodal_input_loader(
+        #     tokenizer=self.tokenizer,
+        #     model_dir=self.model_dir,
+        #     model_type=self.model_type,
+        #     modality=self.modality,
+        #     prompts=[text_prompt],
+        #     image_data_format="pt",
+        #     device="cuda",
+        #     **loader_kwargs,
+        # )
+        # t0 = time.perf_counter()
+        processed_inputs = await self.get_multimodal_inputs(messages=messages)
+        # t1 = time.perf_counter()
+        # print(f"**************get_multimodal_inputs time: {(t1 - t0)*1000:.2f} ms")
 
         # Return the first processed input if available
         if processed_inputs:
             return processed_inputs[0]
 
         return None
+    
+    async def get_multimodal_inputs(
+        self,
+        messages: List[Dict],
+    ) -> List[Any]:
+        conversation: List[ConversationMessage] = []
 
+        # t0 = time.perf_counter()
+        conversation, mm_coroutines, mm_placeholder_counts = self.parse_chat_messages_coroutines(messages, self.model_type)
+        # t1 = time.perf_counter()
+        # print(f"**************parse_chat_messages_coroutines time: {(t1 - t0)*1000:.2f} ms")
+
+        prompt: str = apply_chat_template(
+                model_type=self.model_type,
+                tokenizer=self.tokenizer,
+                processor=self.processor,
+                conversation=conversation,
+                mm_placeholder_counts=mm_placeholder_counts,
+                add_generation_prompt=True,
+            )
+        input = {"prompt": prompt}
+        # t2 = time.perf_counter()
+        # print(f"**************apply_chat_template time: {(t2 - t1)*1000:.2f} ms")
+
+        mm_data = await mm_coroutines
+        if mm_data is not None:
+            input["multi_modal_data"] = mm_data
+        # t3 = time.perf_counter()
+        # print(f"**************await mm_coroutines time: {(t3 - t2)*1000:.2f} ms")
+        return [input]
+
+    def parse_chat_messages_coroutines(
+        self,
+        messages: List[Any],
+        model_type: str,
+    ) -> Tuple[List[ConversationMessage], Optional[Coroutine[
+            Any, Any, Optional[Dict[str, List[Any]]]]]]:
+        """Parse multiple chat messages and return conversation and coroutine."""
+        conversation = []
+        mm_placeholder_counts = []
+        mm_data_tracker = MultimodalDataTracker(model_type)
+
+        for msg in messages:
+            parsed_msg = parse_chat_message_content(msg, mm_data_tracker)
+            conversation.append(parsed_msg)
+            tmp_tracker = MultimodalDataTracker(model_type)
+            if parsed_msg["media"]:
+                for mdata in parsed_msg["media"]:
+                    mm_data_tracker.add_data(mdata["modality"], mdata["data"])
+                    tmp_tracker.add_data(mdata["modality"], mdata["data"])
+            mm_placeholder_count = tmp_tracker.placeholder_counts()
+            if mm_placeholder_count:
+                parsed_msg["content"] = add_multimodal_placeholders(
+                    model_type, parsed_msg["content"],
+                    mm_placeholder_count)
+            mm_placeholder_counts.append(mm_placeholder_count)
+
+        return conversation, mm_data_tracker.retrieve_all_async(
+        ), mm_placeholder_counts
+    
     def create_response_chunk(
         self,
         output: Any,
