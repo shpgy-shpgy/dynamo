@@ -385,11 +385,11 @@ impl ModelDeploymentCard {
             return Ok(());
         }
 
-        let ignore_weights = true;
-        let local_path = crate::hub::from_hf(&self.display_name, ignore_weights).await?;
+        // let ignore_weights = true;
+        // let local_path = crate::hub::from_hf(&self.display_name, ignore_weights).await?;
 
-        self.update_dir(&local_path);
-        Ok(())
+        // self.update_dir(&local_path);
+        Err(anyhow::anyhow!("Not allowed to download model config"))
     }
 
     /// Are all the files we need (tokenizer.json, etc) available locally?

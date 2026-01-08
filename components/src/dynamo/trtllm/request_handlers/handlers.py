@@ -110,9 +110,7 @@ class PrefillHandler(HandlerBase):
         logging.debug(f"PrefillHandler.generate received request: {request}")
         embeddings_tensor = None
 
-        # print(f"PrefillHandler: processing input for embeddings, multimodal_processor={self.multimodal_processor is not None}")
         if self.multimodal_processor:
-            # print("PrefillHandler: processing multimodal input for embeddings")
             # Extract messages from extra_args (set by Rust preprocessor) or fall back to direct field
             messages = request.get("extra_args", {}).get(
                 "messages", request.get("messages", [])

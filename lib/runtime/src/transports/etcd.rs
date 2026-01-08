@@ -9,6 +9,7 @@ use derive_builder::Builder;
 use derive_getters::Dissolve;
 use futures::StreamExt;
 use std::collections::HashMap;
+use std::env;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use validator::Validate;
@@ -44,6 +45,7 @@ pub struct Client {
     // Avoid those tasks from being starved when the main runtime is busy
     // WARNING: Do not await on main runtime from this runtime or deadlocks may occur
     rt: Arc<tokio::runtime::Runtime>,
+    watch_buffer_size: usize,
 }
 
 impl std::fmt::Debug for Client {
@@ -102,11 +104,17 @@ impl Client {
         )
         .await?;
 
+        let watch_buffer_size = env::var("ETCD_WATCH_BUFFER_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(128);
+
         Ok(Client {
             connector,
             primary_lease: lease_id,
             rt,
             runtime,
+            watch_buffer_size,
         })
     }
 
@@ -319,7 +327,8 @@ impl Client {
         prefix: impl AsRef<str> + std::fmt::Display,
         include_existing: bool,
     ) -> Result<PrefixWatcher> {
-        let (tx, rx) = mpsc::channel(32);
+        let (tx, rx) = mpsc::channel(self.watch_buffer_size);
+        tracing::debug!("fix correct to {:?}", self.watch_buffer_size);
 
         // Get start revision and send existing KVs
         let mut start_revision = self

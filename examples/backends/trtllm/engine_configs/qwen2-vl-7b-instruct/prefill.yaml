@@ -12,11 +12,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-tensor_parallel_size: 4
+tensor_parallel_size: 2
 moe_expert_parallel_size: 1
 enable_attention_dp: false
 max_num_tokens: 8192
-max_batch_size: 128
+max_batch_size: 1
 max_seq_len: 32768
 trust_remote_code: true
 backend: pytorch
@@ -26,7 +26,7 @@ print_iter_log: false
 disable_overlap_scheduler: true
 
 kv_cache_config:
-  free_gpu_memory_fraction: 0.30
+  free_gpu_memory_fraction: 0.70
   enable_block_reuse: false
 
 scheduler_config:
@@ -34,4 +34,4 @@ scheduler_config:
 
 cache_transceiver_config:
   backend: UCX
-  max_tokens_in_buffer: 8192
+  max_tokens_in_buffer: 16384

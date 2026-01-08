@@ -184,18 +184,15 @@ class MultimodalRequestProcessor:
         #     # EPD flow
         #     loader_kwargs["mm_embeddings"] = [embeddings]
         #     logging.debug(f"Using NIXL embeddings in prefill worker: {embeddings}")
-        #     print(f"************Using NIXL embeddings in prefill worker")
         # elif image_urls:
         #     # Image-only flow
         #     loader_kwargs["media"] = [image_urls]
-        #     print(f"************Using image URLs in prefill worker")
         # elif embedding_paths:
         #     # PD flow with no NIXL and no encoder
         #     loader_kwargs["mm_embeddings"] = [
         #         self.load_tensor_from_path_or_url(path) for path in embedding_paths
         #     ]
         #     logging.debug(f"Using embedding paths in prefill worker: {embedding_paths}")
-        #     print(f"************Using embedding paths in prefill worker: {embedding_paths}")
 
         # # Process with default_multimodal_input_loader
         # processed_inputs = default_multimodal_input_loader(
@@ -208,10 +205,7 @@ class MultimodalRequestProcessor:
         #     device="cuda",
         #     **loader_kwargs,
         # )
-        # t0 = time.perf_counter()
         processed_inputs = await self.get_multimodal_inputs(messages=messages)
-        # t1 = time.perf_counter()
-        # print(f"**************get_multimodal_inputs time: {(t1 - t0)*1000:.2f} ms")
 
         # Return the first processed input if available
         if processed_inputs:
@@ -225,10 +219,7 @@ class MultimodalRequestProcessor:
     ) -> List[Any]:
         conversation: List[ConversationMessage] = []
 
-        # t0 = time.perf_counter()
         conversation, mm_coroutines, mm_placeholder_counts = self.parse_chat_messages_coroutines(messages, self.model_type)
-        # t1 = time.perf_counter()
-        # print(f"**************parse_chat_messages_coroutines time: {(t1 - t0)*1000:.2f} ms")
 
         prompt: str = apply_chat_template(
                 model_type=self.model_type,
@@ -239,14 +230,10 @@ class MultimodalRequestProcessor:
                 add_generation_prompt=True,
             )
         input = {"prompt": prompt}
-        # t2 = time.perf_counter()
-        # print(f"**************apply_chat_template time: {(t2 - t1)*1000:.2f} ms")
 
         mm_data = await mm_coroutines
         if mm_data is not None:
             input["multi_modal_data"] = mm_data
-        # t3 = time.perf_counter()
-        # print(f"**************await mm_coroutines time: {(t3 - t2)*1000:.2f} ms")
         return [input]
 
     def parse_chat_messages_coroutines(
