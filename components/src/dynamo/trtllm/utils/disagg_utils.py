@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import base64
+# import torch
 
 from tensorrt_llm.llmapi import DisaggregatedParams
 
@@ -35,12 +36,26 @@ class DisaggregatedParamsCodec:
             if disaggregated_params.opaque_state is not None
             else None
         )
+        # if disaggregated_params.extra_processed_inputs is not None:
+        #     extra_processed_inputs = disaggregated_params.extra_processed_inputs
+        #     multimodal_data = extra_processed_inputs.get("multimodal_data", {})
+        #     mrope_config = multimodal_data.get("mrope_config", {})
+        #     torch_mrope_config = {}
+        #     for k, v in mrope_config.items():
+        #         torch_mrope_config[k] = torch.tensor(v)
+        #         # print(k, torch_mrope_config[k])
+        #     multimodal_data["mrope_config"] = torch_mrope_config
+        # else:
+        #     extra_processed_inputs = None
+        
         return DisaggregatedParams(
             request_type=disaggregated_params.request_type,
             first_gen_tokens=disaggregated_params.first_gen_tokens,
             ctx_request_id=disaggregated_params.ctx_request_id,
             opaque_state=opaque_state,
             draft_tokens=disaggregated_params.draft_tokens,
+            # prompt_token_ids=disaggregated_params.prompt_token_ids,
+            # extra_processed_inputs=extra_processed_inputs,
         )
 
     @staticmethod
@@ -61,4 +76,6 @@ class DisaggregatedParamsCodec:
             ctx_request_id=disaggregated_params.ctx_request_id,
             opaque_state=encoded_opaque_state,
             draft_tokens=disaggregated_params.draft_tokens,
+            # prompt_token_ids=disaggregated_params.prompt_token_ids,
+            # extra_processed_inputs=disaggregated_params.extra_processed_inputs,
         )

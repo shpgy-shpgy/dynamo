@@ -180,24 +180,26 @@ class HandlerBase:
             embeddings: Optional tensor or dict containing embeddings for multimodal processing
         """
         logging.debug(f"Request: {request}")
-        # t0 = time.perf_counter()
+        # start_time = time.perf_counter()
 
         # Default to text-based input. This will be overwritten if multimodal
         # content is found and processed.
         processed_input = None
 
         # Check for multimodal request and process it
+        # if self.multimodal_processor and self.disaggregation_mode == DisaggregationMode.PREFILL:
         if self.multimodal_processor:
             processed_input = await self.multimodal_processor.process_openai_request(
                 request, embeddings
             )
-
+        # elif self.disaggregation_mode == DisaggregationMode.DECODE:
+            # processed_input = request["disaggregated_params"].get("prompt_token_ids")
         else:
             # text-only flow
             processed_input = request.get("token_ids")
-        
-        # t1 = time.perf_counter()
-        # print(f"************Input processing time: {(t1 - t0)*1000:.4f} ms")
+        # print(request.keys())
+        # print(f"************Input processing time: {(time.perf_counter() - start_time)*1000:.4f} ms")
+        # start_time = time.perf_counter()
 
         # Check if there is an error in the publisher error queue
         publishers_error = (
@@ -214,6 +216,7 @@ class HandlerBase:
             disaggregated_params = LlmDisaggregatedParams(request_type="context_only")
 
         if "disaggregated_params" in request:
+            # print(self.disaggregation_mode, request["disaggregated_params"])
             if self.disaggregation_mode == DisaggregationMode.PREFILL:
                 raise ValueError("Cannot provide disaggregated_params in prefill mode")
             disaggregated_params = DisaggregatedParamsCodec.decode(
@@ -263,9 +266,8 @@ class HandlerBase:
             adapters = create_trtllm_adapters(processors)
             sampling_params.logits_processor = adapters
 
-        
-        # t2 = time.perf_counter()
-        # print(f"************Sampling params setup time: {(t2 - t1)*1000:.4f} ms")
+        # print(f"************Sampling params setup time: {(time.perf_counter() - start_time)*1000:.4f} ms")
+        # start_time = time.perf_counter()
         
         try:
             # NEW: Updated engine call to include multimodal data
@@ -275,7 +277,10 @@ class HandlerBase:
                 disaggregated_params=disaggregated_params,
                 streaming=streaming,
             )
-
+            # print(f"************generation prepare: {(time.perf_counter() - start_time)*1000:.4f} ms")
+            # start_time = time.perf_counter()
+            
+            # first_token = True
             # Use the context manager to handle cancellation monitoring
             async with self._cancellation_monitor(generation_result, context):
                 async for res in generation_result:
@@ -284,6 +289,11 @@ class HandlerBase:
                     if self.first_generation and self.publisher:
                         self.publisher.start()
                         self.first_generation = False
+                    
+                    # if first_token:
+                    #     print(f"************First token generation time: {(time.perf_counter() - start_time)*1000:.4f} ms")
+                    #     first_token = False
+                    #     start_time = time.perf_counter()
 
                     # If we are not done generating, but there are no outputs, return an error
                     if not res.outputs and not res.finished:
@@ -303,6 +313,8 @@ class HandlerBase:
                         out["stop_reason"] = output.stop_reason
                     if self.disaggregation_mode == DisaggregationMode.PREFILL:
                         # Return the disaggregated params only when operating in prefill mode.
+                        # output.disaggregated_params.prompt_token_ids = res.prompt_token_ids
+                        # output.disaggregated_params.extra_processed_inputs = res.extra_processed_inputs
                         out["disaggregated_params"] = asdict(
                             DisaggregatedParamsCodec.encode(output.disaggregated_params)
                         )

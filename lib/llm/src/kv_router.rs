@@ -582,12 +582,15 @@ impl AsyncEngine<SingleIn<PreprocessedRequest>, ManyOut<Annotated<LLMEngineOutpu
                 backend_input.dp_rank = Some(dp_rank);
                 let updated_request = context.map(|_| backend_input);
 
+                // let ttft_cost = std::time::Instant::now();
+
                 let mut response_stream = self.inner.direct(updated_request, instance_id).await?;
                 let stream_context = response_stream.context();
                 let chooser = self.chooser.clone();
                 let context_for_monitoring = stream_context.clone();
 
                 let wrapped_stream = Box::pin(async_stream::stream! {
+                    // let mut ttft_recorded = false;
                     let mut prefill_marked = false;
 
                     loop {
@@ -610,6 +613,11 @@ impl AsyncEngine<SingleIn<PreprocessedRequest>, ManyOut<Annotated<LLMEngineOutpu
                                     }
                                     prefill_marked = true;
                                 }
+                                // if !ttft_recorded {
+                                //     let ttft_duration = ttft_cost.elapsed();
+                                //     tracing::warn!(ttft_ms = ttft_duration.as_millis(), "First token received");
+                                //     ttft_recorded = true;
+                                // }
                                 yield item;
                             }
                         }

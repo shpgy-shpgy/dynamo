@@ -25,6 +25,7 @@ use futures::stream::{self, StreamExt};
 use prompt::OAIPromptFormatter;
 use std::{collections::HashMap, pin::Pin, sync::Arc};
 use tracing;
+use url::Url;
 
 use crate::model_card::{ModelDeploymentCard, ModelInfo};
 use crate::preprocessor::media::MediaLoader;
@@ -176,16 +177,34 @@ impl OpenAIPreprocessor {
         &self,
         request: &R,
     ) -> Result<(PreprocessedRequest, HashMap<String, String>)> {
+        // let init_builder = std::time::Instant::now();
         let mut builder = self.builder(request)?;
+        // let init_builder_duration = init_builder.elapsed();
+
+        // let template_start = std::time::Instant::now();
         let formatted_prompt = self
             .apply_template(request)
             .with_context(|| "Failed to apply prompt template")?;
+        // let template_duration = template_start.elapsed();
+
+        // let tokenize_start = std::time::Instant::now();
         let annotations = self
             .gather_tokens(request, &mut builder, formatted_prompt)
             .with_context(|| "Failed to gather tokens")?;
+        // let tokenize_duration = tokenize_start.elapsed();
+
+        // let multimodal_start = std::time::Instant::now();
         self.gather_multi_modal_data(request, &mut builder)
             .await
             .with_context(|| "Failed to gather multimodal data")?;
+        // let multimodal_duration = multimodal_start.elapsed();
+        // tracing::warn!(
+        //     "Preprocessing timings (ms): init_builder: {}, template: {}, tokenize: {}, multimodal: {}",
+        //     init_builder_duration.as_millis(),
+        //     template_duration.as_millis(),
+        //     tokenize_duration.as_millis(),
+        //     multimodal_duration.as_millis()
+        // );
 
         Ok((builder.build()?, annotations))
     }
@@ -277,75 +296,89 @@ impl OpenAIPreprocessor {
         builder: &mut PreprocessedRequestBuilder,
     ) -> Result<()> {
         let messages = request.messages();
-        let message_count = messages.len().unwrap_or(0);
-        let mut media_map: MultimodalDataMap = HashMap::new();
-        let mut fetch_tasks = Vec::new();
+        // let message_count = messages.len().unwrap_or(0);
+        // let mut media_map: MultimodalDataMap = HashMap::new();
+        // let mut fetch_tasks = Vec::new();
 
-        for idx in 0..message_count {
-            let msg = messages
-                .get_item_by_index(idx)
-                .map_err(|_| anyhow::Error::msg(format!("Cannot get message at index {idx}")))?;
+        // for idx in 0..message_count {
+        //     let msg = messages
+        //         .get_item_by_index(idx)
+        //         .map_err(|_| anyhow::Error::msg(format!("Cannot get message at index {idx}")))?;
 
-            let msg_json: serde_json::Value = serde_json::to_value(&msg)?;
-            let message: ChatCompletionRequestMessage = serde_json::from_value(msg_json)?;
+        //     let msg_json: serde_json::Value = serde_json::to_value(&msg)?;
+        //     let message: ChatCompletionRequestMessage = serde_json::from_value(msg_json)?;
 
-            let content_parts = match &message {
-                ChatCompletionRequestMessage::User(u) => match &u.content {
-                    ChatCompletionRequestUserMessageContent::Array(parts) => parts,
-                    _ => continue,
-                },
-                _ => continue,
-            };
+        //     let content_parts = match &message {
+        //         ChatCompletionRequestMessage::User(u) => match &u.content {
+        //             ChatCompletionRequestUserMessageContent::Array(parts) => parts,
+        //             _ => continue,
+        //         },
+        //         _ => continue,
+        //     };
 
-            // Iterate over content parts
-            for content_part in content_parts {
-                let (type_str, url) = match content_part {
-                    ChatCompletionRequestUserMessageContentPart::ImageUrl(image_part) => {
-                        ("image_url".to_string(), image_part.image_url.url.clone())
-                    }
-                    ChatCompletionRequestUserMessageContentPart::VideoUrl(video_part) => {
-                        ("video_url".to_string(), video_part.video_url.url.clone())
-                    }
-                    ChatCompletionRequestUserMessageContentPart::AudioUrl(audio_part) => {
-                        ("audio_url".to_string(), audio_part.audio_url.url.clone())
-                    }
-                    _ => continue,
-                };
+        //     // Iterate over content parts
+        //     for content_part in content_parts {
+        //         let (type_str, url) = match content_part {
+        //             ChatCompletionRequestUserMessageContentPart::ImageUrl(image_part) => {
+        //                 ("image_url".to_string(), image_part.image_url.url.clone())
+        //             }
+        //             ChatCompletionRequestUserMessageContentPart::VideoUrl(video_part) => {
+        //                 ("video_url".to_string(), video_part.video_url.url.clone())
+        //             }
+        //             ChatCompletionRequestUserMessageContentPart::AudioUrl(audio_part) => {
+        //                 ("audio_url".to_string(), audio_part.audio_url.url.clone())
+        //             }
+        //             _ => continue,
+        //         };
 
-                if self.media_loader.is_some() {
-                    fetch_tasks.push((type_str, content_part.clone()));
-                } else {
-                    // No loader, just pass the URL through
-                    media_map
-                        .entry(type_str)
-                        .or_default()
-                        .push(MultimodalData::Url(url));
-                }
-            }
-        }
+        //         if self.media_loader.is_some() {
+        //             fetch_tasks.push((type_str, content_part.clone()));
+        //         } else {
+        //             // No loader, just pass the URL through
+        //             media_map
+        //                 .entry(type_str)
+        //                 .or_default()
+        //                 .push(MultimodalData::Url(url));
+        //         }
+        //     }
+        // }
+        // let iterate_duration = iterate_start.elapsed();
 
+        // let execution_start = std::time::Instant::now();
         // Execute all fetch tasks
-        if !fetch_tasks.is_empty() {
-            let loader = self.media_loader.as_ref().unwrap();
-            let _results = futures::future::join_all(
-                fetch_tasks
-                    .iter()
-                    .map(|(_, content_part)| loader.fetch_and_decode_media_part(content_part)),
-            )
-            .await;
+        // if !fetch_tasks.is_empty() {
+        //     let loader = self.media_loader.as_ref().unwrap();
+        //     let _results = futures::future::join_all(
+        //         fetch_tasks
+        //             .iter()
+        //             .map(|(_, content_part)| loader.fetch_and_decode_media_part(content_part)),
+        //     )
+        //     .await;
 
-            // TODO: decode and pass NIXL descriptors to the media map
-        }
+        //     // TODO: decode and pass NIXL descriptors to the media map
+        // }
+        // let execution_duration = execution_start.elapsed();
 
-        if !media_map.is_empty() {
-            builder.multi_modal_data(Some(media_map));
-        }
+        // let builder_start = std::time::Instant::now();
+        // if !media_map.is_empty() {
+        //     builder.multi_modal_data(Some(media_map));
+        // }
+        // let builder_duration = builder_start.elapsed();
         // Preserve original messages in extra_args for multimodal workers that need them
         // (e.g., TRT-LLM multimodal processor needs raw messages for proper tokenization)
+        // let serialize_start = std::time::Instant::now();
         let messages_json = serde_json::to_value(&messages)?;
         let extra_args = serde_json::json!({
             "messages": messages_json
         });
+        // let serialize_duration = serialize_start.elapsed();
+        // tracing::warn!(
+        //     "Multimodal data gathering timings (ms): iterate: {}, execute: {}, builder: {}, serialize: {}",
+        //     iterate_duration.as_millis(),
+        //     execution_duration.as_millis(),
+        //     builder_duration.as_millis(),
+        //     serialize_duration.as_millis()
+        // );
         builder.extra_args(Some(extra_args));
 
         Ok(())

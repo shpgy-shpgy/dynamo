@@ -10,7 +10,7 @@ networks:
 
 services:
   nats-server:
-    image: nats:2.11.4
+    image: docker.m.daocloud.io/nats:2.11.4
     command: [ "-js", "--trace", "-m", "8222" ]
     ports:
       - 4222:4222
@@ -20,7 +20,7 @@ services:
       - server
 
   etcd-server:
-    image: bitnamilegacy/etcd:3.6.1
+    image: docker.m.daocloud.io/bitnami/etcd:3.6.1
     environment:
       - ALLOW_NONE_AUTHENTICATION=yes
     ports:
