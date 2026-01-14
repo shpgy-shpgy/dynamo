@@ -187,13 +187,13 @@ class HandlerBase:
         processed_input = None
 
         # Check for multimodal request and process it
-        # if self.multimodal_processor and self.disaggregation_mode == DisaggregationMode.PREFILL:
-        if self.multimodal_processor:
+        if self.multimodal_processor and self.disaggregation_mode == DisaggregationMode.PREFILL:
+        # if self.multimodal_processor:
             processed_input = await self.multimodal_processor.process_openai_request(
                 request, embeddings
             )
-        # elif self.disaggregation_mode == DisaggregationMode.DECODE:
-            # processed_input = request["disaggregated_params"].get("prompt_token_ids")
+        elif self.disaggregation_mode == DisaggregationMode.DECODE:
+            processed_input = request["disaggregated_params"].get("prompt_token_ids")
         else:
             # text-only flow
             processed_input = request.get("token_ids")
@@ -313,8 +313,8 @@ class HandlerBase:
                         out["stop_reason"] = output.stop_reason
                     if self.disaggregation_mode == DisaggregationMode.PREFILL:
                         # Return the disaggregated params only when operating in prefill mode.
-                        # output.disaggregated_params.prompt_token_ids = res.prompt_token_ids
-                        # output.disaggregated_params.extra_processed_inputs = res.extra_processed_inputs
+                        output.disaggregated_params.prompt_token_ids = res.prompt_token_ids
+                        output.disaggregated_params.extra_processed_inputs = res.extra_processed_inputs
                         out["disaggregated_params"] = asdict(
                             DisaggregatedParamsCodec.encode(output.disaggregated_params)
                         )
