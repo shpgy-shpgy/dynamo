@@ -192,8 +192,12 @@ class HandlerBase:
             processed_input = await self.multimodal_processor.process_openai_request(
                 request, embeddings
             )
-        elif self.disaggregation_mode == DisaggregationMode.DECODE:
+        elif self.disaggregation_mode == DisaggregationMode.DECODE and "disaggregated_params" in request:
             processed_input = request["disaggregated_params"].get("prompt_token_ids")
+        elif self.disaggregation_mode == DisaggregationMode.DECODE:
+            processed_input = await self.multimodal_processor.process_openai_request(
+                request, embeddings
+            )
         else:
             # text-only flow
             processed_input = request.get("token_ids")
@@ -226,9 +230,9 @@ class HandlerBase:
 
         if (
             self.disaggregation_mode == DisaggregationMode.DECODE
-            and disaggregated_params is None
         ):
-            raise ValueError("Disaggregated params are required for decode mode")
+            if not disaggregated_params:
+                disaggregated_params = LlmDisaggregatedParams(request_type="context_and_generation")
 
         num_output_tokens_so_far = 0
 
