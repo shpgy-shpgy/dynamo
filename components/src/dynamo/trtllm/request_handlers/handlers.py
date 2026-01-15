@@ -110,20 +110,20 @@ class PrefillHandler(HandlerBase):
         logging.debug(f"PrefillHandler.generate received request: {request}")
         embeddings_tensor = None
 
-        if self.multimodal_processor:
-            # Extract messages from extra_args (set by Rust preprocessor) or fall back to direct field
-            messages = request.get("extra_args", {}).get(
-                "messages", request.get("messages", [])
-            )
-            _, _, embedding_paths = self.multimodal_processor.extract_prompt_and_media(
-                messages
-            )
-            if embedding_paths:
-                if self.encode_client and self.connector:
-                    logging.debug(
-                        "PrefillHandler calling Encode Worker via remote_encode_with_nixl"
-                    )
-                    embeddings_tensor = await self.remote_encode_with_nixl(request)
+        # if self.multimodal_processor:
+        #     # Extract messages from extra_args (set by Rust preprocessor) or fall back to direct field
+        #     messages = request.get("extra_args", {}).get(
+        #         "messages", request.get("messages", [])
+        #     )
+        #     _, _, embedding_paths = self.multimodal_processor.extract_prompt_and_media(
+        #         messages
+        #     )
+        #     if embedding_paths:
+        #         if self.encode_client and self.connector:
+        #             logging.debug(
+        #                 "PrefillHandler calling Encode Worker via remote_encode_with_nixl"
+        #             )
+        #             embeddings_tensor = await self.remote_encode_with_nixl(request)
 
         # Generate prefill response locally and return disaggregated_params
         response_count = 0

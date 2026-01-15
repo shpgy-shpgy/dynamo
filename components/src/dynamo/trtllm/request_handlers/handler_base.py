@@ -226,9 +226,11 @@ class HandlerBase:
 
         if (
             self.disaggregation_mode == DisaggregationMode.DECODE
-            and disaggregated_params is None
         ):
-            raise ValueError("Disaggregated params are required for decode mode")
+            if not disaggregated_params:
+                disaggregated_params = LlmDisaggregatedParams(
+                    request_type="context_and_generation"
+                )
 
         num_output_tokens_so_far = 0
 
