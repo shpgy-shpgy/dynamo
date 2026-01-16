@@ -194,7 +194,7 @@ class HandlerBase:
             )
         elif self.disaggregation_mode == DisaggregationMode.DECODE and "disaggregated_params" in request:
             processed_input = request["disaggregated_params"].get("prompt_token_ids")
-        elif self.disaggregation_mode == DisaggregationMode.DECODE:
+        elif  self.multimodal_processor:
             processed_input = await self.multimodal_processor.process_openai_request(
                 request, embeddings
             )
