@@ -42,7 +42,7 @@ class DisaggregatedParamsCodec:
             mrope_config = multimodal_data.get("mrope_config", {})
             multimodal_data["mrope_config"] = dict(
                 mrope_position_ids=torch.tensor(mrope_config['mrope_position_ids'], dtype=torch.int32),
-                mrope_position_deltas=torch.tensor(mrope_config['mrope_position_deltas'])
+                mrope_position_deltas=torch.tensor(mrope_config['mrope_position_deltas'], dtype=torch.int32))
             )
         else:
             extra_processed_inputs = None
