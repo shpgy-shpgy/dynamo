@@ -20,7 +20,7 @@ use tokio::io::{AsyncReadExt, ReadHalf, WriteHalf};
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
-    time::{self, Duration, Instant},
+    time::{self, timeout, Duration, Instant},
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
 
@@ -32,6 +32,8 @@ use crate::pipeline::network::{
     tcp::StreamType,
 };
 use crate::{ErrorContext, Result, error}; // Import SinkExt to use the `send` method
+
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[allow(dead_code)]
 pub struct TcpClient {
@@ -239,10 +241,10 @@ async fn handle_reader(
                            }
                         }
                     }
-                    Some(Err(_)) => {
+                    Some(Err(e)) => {
                         // TODO(#171) - address fatal errors
                         // in this case the binary representation of the message is invalid
-                        panic!("fatal error - failed to decode message from stream; invalid line protocol");
+                        panic!("fatal error - failed to decode message from stream; invalid line protocol: {e:?}");
                     }
                     None => {
                         tracing::debug!("tcp stream closed by server");
@@ -269,7 +271,7 @@ async fn handle_writer(
             biased;
 
             _ = context.killed() => {
-                tracing::trace!("context kill signal received; shutting down");
+                tracing::info!("context kill signal received; shutting down");
                 break;
             }
 
@@ -284,19 +286,29 @@ async fn handle_writer(
             }
         };
 
-        if let Err(e) = framed_writer.send(msg).await {
-            tracing::trace!(
-                "failed to send message to network; possible disconnect: {:?}",
-                e
-            );
-            break;
+        
+        match timeout(SEND_TIMEOUT, framed_writer.send(msg)).await {
+            Ok(Ok(())) => continue,
+            Ok(Err(e)) => {
+                tracing::info!(
+                    "***********failed to send message to network; possible disconnect: {:?}",
+                    e
+                );
+                break;
+            }
+            Err(_) => {
+                tracing::info!(
+                    "***********timeout sending message to network; possible disconnect"
+                );
+                break;
+            }
         }
     }
 
     // send sentinel message
     let message = serde_json::to_vec(&ControlMessage::Sentinel)?;
     let msg = TwoPartMessage::from_header(message.into());
-    framed_writer.send(msg).await?;
+    let _ = timeout(SEND_TIMEOUT, framed_writer.send(msg)).await?;
 
     drop(alive_rx);
     Ok(framed_writer)

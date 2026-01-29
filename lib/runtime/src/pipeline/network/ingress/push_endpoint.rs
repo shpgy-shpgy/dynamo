@@ -16,6 +16,9 @@ use std::sync::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
+use tokio::time::timeout;
+
+const RESPOND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[derive(Builder)]
 pub struct PushEndpoint {
@@ -45,6 +48,7 @@ impl PushEndpoint {
         let mut endpoint = endpoint;
 
         let inflight = Arc::new(AtomicU64::new(0));
+        let request_id = Arc::new(AtomicU64::new(0));
         let notify = Arc::new(Notify::new());
         let component_name_local: Arc<String> = Arc::from(component_name);
         let endpoint_name_local: Arc<String> = Arc::from(endpoint_name);
@@ -76,11 +80,16 @@ impl PushEndpoint {
 
             if let Some(req) = req {
                 let response = "".to_string();
-                if let Err(e) = req.respond(Ok(response.into())).await {
-                    tracing::warn!(
-                        "Failed to respond to request; this may indicate the request has shutdown: {:?}",
-                        e
-                    );
+
+                match timeout(RESPOND_TIMEOUT, req.respond(Ok(response.into()))).await?{
+                    Ok(_) => {},
+                    Err(e) => {
+                        tracing::info!(
+                            "Failed to respond to request within timeout; this may indicate the request has shutdown: {:?}",
+                            e
+                        );
+                        continue;
+                    }
                 }
 
                 let ingress = self.service_handler.clone();
@@ -90,8 +99,10 @@ impl PushEndpoint {
 
                 // increment the inflight counter
                 inflight.fetch_add(1, Ordering::SeqCst);
+                let current_request_id = request_id.fetch_add(1, Ordering::SeqCst);
                 let inflight_clone = inflight.clone();
                 let notify_clone = notify.clone();
+                tracing::info!("inflight request count increased 1; req id: {:?}", current_request_id);
 
                 // Handle headers here for tracing
 
@@ -101,10 +112,11 @@ impl PushEndpoint {
                     traceparent = TraceParent::from_headers(headers);
                 }
 
+
                 tokio::spawn(async move {
                     tracing::trace!(instance_id, "handling new request");
                     let result = ingress
-                        .handle_payload(req.message.payload)
+                        .handle_payload(req.message.payload, current_request_id)
                         .instrument(
                             // Create span with trace ids as set
                             // in headers.
@@ -132,6 +144,7 @@ impl PushEndpoint {
                     }
 
                     // decrease the inflight counter
+                    tracing::info!("inflight request count decreased 1; req id: {:?}", current_request_id);
                     inflight_clone.fetch_sub(1, Ordering::SeqCst);
                     notify_clone.notify_one();
                 });

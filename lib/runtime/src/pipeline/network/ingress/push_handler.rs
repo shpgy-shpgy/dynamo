@@ -138,7 +138,11 @@ where
         Ingress::add_metrics(self, endpoint, metrics_labels)
     }
 
-    async fn handle_payload(&self, payload: Bytes) -> Result<(), PipelineError> {
+    async fn handle_payload(
+        &self,
+        payload: Bytes,
+        current_request_id: u64,
+    ) -> Result<(), PipelineError> {
         let start_time = std::time::Instant::now();
 
         // Increment inflight and ensure it's decremented on all exits via RAII guard
@@ -203,7 +207,10 @@ where
 
         // todo - eventually have a handler class which will returned an abstracted object, but for now,
         // we only support tcp here, so we can just unwrap the connection info
-        tracing::trace!("creating tcp response stream");
+        tracing::info!(
+            "creating tcp response stream: req id {:?}",
+            current_request_id
+        );
         let mut publisher = tcp::client::TcpClient::create_response_stream(
             request.context(),
             control_msg.connection_info,
@@ -218,7 +225,7 @@ where
             PipelineError::Generic(format!("Failed to create response stream: {:?}", e,))
         })?;
 
-        tracing::trace!("calling generate");
+        tracing::info!("calling generate: req id {:?}", current_request_id);
         let stream = self
             .segment
             .get()
@@ -238,7 +245,10 @@ where
         // or if the generate call failed, the error is sent to the client
         let mut stream = match stream {
             Ok(stream) => {
-                tracing::trace!("Successfully generated response stream; sending prologue");
+                tracing::info!(
+                    "Successfully generated response stream; sending prologue, req id {:?}",
+                    current_request_id
+                );
                 let _result = publisher.send_prologue(None).await;
                 stream
             }

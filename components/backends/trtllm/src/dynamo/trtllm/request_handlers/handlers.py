@@ -221,11 +221,11 @@ class DecodeHandler(HandlerBase):
                     isl_tokens = request.get("prefill_tokens") or 0
 
             threshold = self.short_prefill_threshold
-            logging.info("isl_token: {} threshold: {}".format(isl_tokens, threshold))
+            logging.debug("isl_token: {} threshold: {}".format(isl_tokens, threshold))
             if isl_tokens <= threshold and use_conditional_disaggregation:
                 # Short prefill, handled locally
                 request["conditional_disaggregation"] = {}
-                logging.info("Short prefill, handled locally")
+                logging.warning("Short prefill, handled locally")
             else:
                 async for res in self.remote_prefill(request):
                     prefill_response = res
