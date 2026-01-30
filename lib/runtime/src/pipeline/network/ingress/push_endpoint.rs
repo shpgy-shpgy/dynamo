@@ -102,7 +102,7 @@ impl PushEndpoint {
                 let current_request_id = request_id.fetch_add(1, Ordering::SeqCst);
                 let inflight_clone = inflight.clone();
                 let notify_clone = notify.clone();
-                tracing::info!("inflight request count increased 1; req id: {:?}", current_request_id);
+                tracing::info!("***Step 1***:inflight request count increased 1; req id: {:?}", current_request_id);
 
                 // Handle headers here for tracing
 
@@ -144,7 +144,7 @@ impl PushEndpoint {
                     }
 
                     // decrease the inflight counter
-                    tracing::info!("inflight request count decreased 1; req id: {:?}", current_request_id);
+                    tracing::info!("***Step Fin***: inflight request count decreased 1; req id: {:?}", current_request_id);
                     inflight_clone.fetch_sub(1, Ordering::SeqCst);
                     notify_clone.notify_one();
                 });

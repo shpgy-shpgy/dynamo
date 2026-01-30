@@ -147,7 +147,7 @@ impl Client {
             .collect::<Vec<_>>();
         self.instance_avail.store(Arc::new(filtered));
 
-        tracing::debug!("inhibiting instance {instance_id}");
+        tracing::info!("***Step ERROR***: inhibiting instance {instance_id}");
     }
 
     /// Update the set of free instances based on busy instance IDs

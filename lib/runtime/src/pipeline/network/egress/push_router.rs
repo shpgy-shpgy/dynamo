@@ -149,6 +149,8 @@ where
             }
             instance_ids[counter % count]
         };
+
+        tracing::info!("***Step ???.1 router/decode***: round robin counter increased to {} and selected {}", counter + 1, instance_id);
         tracing::trace!("round robin router selected {instance_id}");
 
         self.generate_with_fault_detection(instance_id, request)
@@ -225,6 +227,7 @@ where
         let subject = self.client.endpoint.subject_to(instance_id);
         let request = request.map(|req| AddressedRequest::new(req, subject));
 
+        tracing::info!("***Step ???.2 router/decode***: sending request to instance {}", instance_id);
         let stream: anyhow::Result<ManyOut<U>> = self.addressed.generate(request).await;
         match stream {
             Ok(stream) => {
