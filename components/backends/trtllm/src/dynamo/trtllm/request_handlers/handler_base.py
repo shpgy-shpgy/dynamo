@@ -193,6 +193,9 @@ class HandlerBase:
             sampling_params.logits_processor = adapters
 
         # NEW: Updated engine call to include multimodal data
+        print("***Step 4.1.2.1***: Starting generation in generate_locally", processed_input[0:2] if processed_input else "no input")
+        if self.engine.llm._executor.is_shutdown():
+            raise RuntimeError("LLM engine is not initialized or has been shut down.")
         async for res in self.engine.llm.generate_async(
             inputs=processed_input,  # Use the correctly extracted inputs
             sampling_params=sampling_params,
@@ -237,9 +240,11 @@ class HandlerBase:
                 out["stop_reason"] = output.stop_reason
             if self.disaggregation_mode == DisaggregationMode.PREFILL:
                 # Return the disaggregated params only when operating in prefill mode.
+                logging.info("***Step 4.1.2.2**: Returning disaggregated params in prefill mode")
                 out["disaggregated_params"] = asdict(
                     DisaggregatedParamsCodec.encode(output.disaggregated_params)
                 )
             # Yield the chunk to the client and update the token count for the next iteration.
             yield out
             num_output_tokens_so_far = next_total_toks
+        logging.info("***Step 4.1.2.3***: Generation completed in generate_locally")

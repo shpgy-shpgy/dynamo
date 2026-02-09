@@ -146,11 +146,17 @@ class PrefillHandler(HandlerBase):
         prefill_request = copy.deepcopy(request)
         prefill_response = None
         response_count = 0
-        async for res in self.generate_locally(prefill_request, embeddings_tensor):
-            prefill_response = res
-            response_count += 1
-            if response_count > 1:
-                raise ValueError("Prefill response should be generated only once.")
+        logging.info(f"***Step 4.1.1***: PrefillHandler.generate received request")
+        try:
+            async for res in self.generate_locally(prefill_request, embeddings_tensor):
+                prefill_response = res
+                response_count += 1
+                logging.info(f"***Step 4.1.3***: PrefillHandler.generate yielded response")
+                if response_count > 1:
+                    raise ValueError("Prefill response should be generated only once.")
+        except Exception as e:
+            logging.error(f"***Step Error***: Error in prefill generation: {e}")
+            raise e
 
         if (
             self.disaggregation_strategy == DisaggregationStrategy.PREFILL_FIRST
@@ -199,8 +205,13 @@ class DecodeHandler(HandlerBase):
         super().__init__(config)
 
     async def remote_prefill(self, request: dict):
-        async for res in await self.next_client.round_robin(request):
-            yield res
+        try:
+            async for res in await self.next_client.round_robin(request):
+                yield res
+        except Exception as e:
+            logging.error(f"***Step Error***: Error in remote prefill: {e}")
+                
+            raise e
 
     async def generate(self, request: dict):
         if self.disaggregation_strategy == DisaggregationStrategy.DECODE_FIRST:
@@ -258,4 +269,6 @@ class DecodeHandler(HandlerBase):
                     ]
 
         async for res in self.generate_locally(request):
+            if res.get("finish_reason") == "error":
+                logging.error(f"***Step Error***: Error in decode response: {res.get('error')}")
             yield res

@@ -20,9 +20,9 @@ use prometheus::{Histogram, IntCounter, IntCounterVec, IntGauge};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::time::timeout;
 use tracing::Instrument;
 use tracing::info_span;
-use tokio::time::timeout;
 
 const STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -211,7 +211,7 @@ where
         // todo - eventually have a handler class which will returned an abstracted object, but for now,
         // we only support tcp here, so we can just unwrap the connection info
         tracing::info!(
-            "***Step 2***: creating tcp response stream: req id {:?}",
+            "***Step 2***: creating tcp response stream: req id: {:?}",
             current_request_id
         );
         let mut publisher = tcp::client::TcpClient::create_response_stream(
@@ -228,7 +228,10 @@ where
             PipelineError::Generic(format!("Failed to create response stream: {:?}", e,))
         })?;
 
-        tracing::info!("***Step 3***: calling generate: req id {:?}", current_request_id);
+        tracing::info!(
+            "***Step 3***: calling generate: req id: {:?}",
+            current_request_id
+        );
         let stream = self
             .segment
             .get()
@@ -249,9 +252,9 @@ where
         let mut stream = match stream {
             Ok(stream) => {
                 let _result = publisher.send_prologue(None).await;
-                
+
                 tracing::info!(
-                    "***Step 4***: Successfully generated response stream; sending prologue, req id {:?}",
+                    "***Step 4***: Successfully generated response stream; sending prologue, req id: {:?}",
                     current_request_id
                 );
                 stream
@@ -277,7 +280,7 @@ where
         };
 
         tracing::info!(
-            "***Step 4.1***: Beginning to send response stream: req id {:?}",
+            "***Step 4.1***: Beginning to send response stream: req id: {:?}",
             current_request_id
         );
 
@@ -285,108 +288,133 @@ where
 
         // TODO: Detect end-of-stream using Server-Sent Events (SSE)
         let mut send_complete_final = true;
-        // while let Some(resp) = stream.next().await {
-        //     tracing::trace!("Sending response: {:?}", resp);
-        //     if let Some(err) = resp.err() {
-        //         tracing::info!(
-        //                 "***Step ERROR***: Error received from response stream for stream {}: {:?}",
-        //                 context.id(),
-        //                 err
-        //             );
-        //         const STREAM_ERR_MSG: &str = "Stream ended before generation completed";
-        //         if format!("{:?}", err) == STREAM_ERR_MSG {
-        //             tracing::warn!(STREAM_ERR_MSG);
+        let mut tokens_num = 0;
+        while let Some(resp) = stream.next().await {
+            tracing::trace!("Sending response: {:?}", resp);
+            if let Some(err) = resp.err() {
+                tracing::info!(
+                    "***Step ERROR***: Error received from response stream for stream: {} ; err: {:?} ; tokens_num: {} ; req id: {:?}",
+                    context.id(),
+                    err,
+                    tokens_num,
+                    current_request_id
+                );
+                const STREAM_ERR_MSG: &str = "Stream ended before generation completed";
+                if format!("{:?}", err) == STREAM_ERR_MSG {
+                    tracing::warn!(STREAM_ERR_MSG);
+                    send_complete_final = false;
+                    break;
+                }
+            }
+            let resp_wrapper = NetworkStreamWrapper {
+                data: Some(resp),
+                complete_final: false,
+            };
+            let resp_bytes = serde_json::to_vec(&resp_wrapper)
+                .expect("fatal error: invalid response object - this should never happen");
+            if let Some(m) = self.metrics() {
+                m.response_bytes.inc_by(resp_bytes.len() as u64);
+            }
+            if (publisher.send(resp_bytes.into()).await).is_err() {
+                tracing::info!(
+                    "Failed to publish response for stream: {} req id: {:?}",
+                    context.id(),
+                    current_request_id
+                );
+                context.kill();
+                send_complete_final = false;
+                if let Some(m) = self.metrics() {
+                    m.error_counter
+                        .with_label_values(&[work_handler::error_types::PUBLISH_RESPONSE])
+                        .inc();
+                }
+
+                break;
+            }
+            tokens_num += 1;
+        }
+        if context.is_stopped() {
+            tracing::info!(
+                "***Step 4.1.context_stop***: Generation stopped by context for stream: {} ; req id: {:?}",
+                context.id(),
+                current_request_id
+            );
+            send_complete_final = false;
+        } else {
+            tracing::info!(
+                "***Step 4.1.context_run***: Generation completed normally for stream: {} ; req id: {:?}",
+                context.id(),
+                current_request_id
+            );
+        }
+        // let mut print_timeout = false;
+        // loop {
+        //     match timeout(STREAM_TIMEOUT, stream.next()).await {
+        //         Ok(Some(resp)) => {
+        //             tracing::trace!("Sending response: {:?}", resp);
+        //             if let Some(err) = resp.err() {
+        //                 const STREAM_ERR_MSG: &str = "Stream ended before generation completed";
+        //                 tracing::error!(
+        //                     "***Step ERROR***: Error received from response stream for stream {}: {:?}",
+        //                     context.id(),
+        //                     err
+        //                 );
+        //                 if format!("{:?}", err) == STREAM_ERR_MSG {
+        //                     tracing::warn!(STREAM_ERR_MSG);
+        //                     send_complete_final = false;
+        //                     break;
+        //                 }
+        //             }
+        //             let resp_wrapper = NetworkStreamWrapper {
+        //                 data: Some(resp),
+        //                 complete_final: false,
+        //             };
+        //             let resp_bytes = serde_json::to_vec(&resp_wrapper)
+        //                 .expect("fatal error: invalid response object - this should never happen");
+        //             if let Some(m) = self.metrics() {
+        //                 m.response_bytes.inc_by(resp_bytes.len() as u64);
+        //             }
+        //             if (publisher.send(resp_bytes.into()).await).is_err() {
+        //                 tracing::error!("Failed to publish response for stream {}", context.id());
+        //                 context.stop_generating();
+        //                 send_complete_final = false;
+        //                 if let Some(m) = self.metrics() {
+        //                     m.error_counter
+        //                         .with_label_values(&[work_handler::error_types::PUBLISH_RESPONSE])
+        //                         .inc();
+        //                 }
+        //                 break;
+        //             }
+        //         }
+        //         Ok(None) => {
+        //             break;
+        //         }
+        //         Err(_) => {
+        //             if !print_timeout {
+        //                 print_timeout = true;
+        //                 tracing::error!(
+        //                     "***Step 4.3***: Response stream timed out for stream {}, req id {:?}",
+        //                     context.id(),
+        //                     current_request_id
+        //                 );
+        //             }
+        //             context.stop_generating();
         //             send_complete_final = false;
+        //             if let Some(m) = self.metrics() {
+        //                 m.error_counter
+        //                     .with_label_values(&[work_handler::error_types::PUBLISH_RESPONSE])
+        //                     .inc();
+        //             }
         //             break;
         //         }
         //     }
-        //     let resp_wrapper = NetworkStreamWrapper {
-        //         data: Some(resp),
-        //         complete_final: false,
-        //     };
-        //     let resp_bytes = serde_json::to_vec(&resp_wrapper)
-        //         .expect("fatal error: invalid response object - this should never happen");
-        //     if let Some(m) = self.metrics() {
-        //         m.response_bytes.inc_by(resp_bytes.len() as u64);
-        //     }
-        //     if (publisher.send(resp_bytes.into()).await).is_err() {
-        //         tracing::info!("Failed to publish response for stream {}", context.id());
-        //         context.stop_generating();
-        //         send_complete_final = false;
-        //         if let Some(m) = self.metrics() {
-        //             m.error_counter
-        //                 .with_label_values(&[work_handler::error_types::PUBLISH_RESPONSE])
-        //                 .inc();
-        //         }
-        //         break;
-        //     }
         // }
-        let mut print_timeout = false;
-        loop {
-            match timeout(STREAM_TIMEOUT, stream.next()).await {
-                Ok(Some(resp)) => {
-                    tracing::trace!("Sending response: {:?}", resp);
-                    if let Some(err) = resp.err() {
-                        const STREAM_ERR_MSG: &str = "Stream ended before generation completed";
-                        tracing::error!(
-                            "***Step ERROR***: Error received from response stream for stream {}: {:?}",
-                            context.id(),
-                            err
-                        );
-                        if format!("{:?}", err) == STREAM_ERR_MSG {
-                            tracing::warn!(STREAM_ERR_MSG);
-                            send_complete_final = false;
-                            break;
-                        }
-                    }
-                    let resp_wrapper = NetworkStreamWrapper {
-                        data: Some(resp),
-                        complete_final: false,
-                    };
-                    let resp_bytes = serde_json::to_vec(&resp_wrapper)
-                        .expect("fatal error: invalid response object - this should never happen");
-                    if let Some(m) = self.metrics() {
-                        m.response_bytes.inc_by(resp_bytes.len() as u64);
-                    }
-                    if (publisher.send(resp_bytes.into()).await).is_err() {
-                        tracing::error!("Failed to publish response for stream {}", context.id());
-                        context.stop_generating();
-                        send_complete_final = false;
-                        if let Some(m) = self.metrics() {
-                            m.error_counter
-                                .with_label_values(&[work_handler::error_types::PUBLISH_RESPONSE])
-                                .inc();
-                        }
-                        break;
-                    }
-                }
-                Ok(None) => {
-                    tracing::info!(
-                        "***Step 4.2***: Response stream ended normally for stream {}",
-                        context.id()
-                    );
-                    break;
-                }
-                Err(_) => {
-                    if !print_timeout {
-                        print_timeout = true;
-                        tracing::error!(
-                            "***Step 4.3***: Response stream timed out for stream {}, req id {:?}",
-                            context.id(),
-                            current_request_id
-                        );
-                    }
-                //     context.stop_generating();
-                //     send_complete_final = false;
-                //     if let Some(m) = self.metrics() {
-                //         m.error_counter
-                //             .with_label_values(&[work_handler::error_types::PUBLISH_RESPONSE])
-                //             .inc();
-                //     }
-                //     break;
-                }
-            }
-        }
+
+        tracing::info!(
+            "***Step 4.2***: Response stream ended normally for stream: {} ; req id: {:?}",
+            context.id(),
+            current_request_id
+        );
         if send_complete_final {
             let resp_wrapper = NetworkStreamWrapper::<U> {
                 data: None,
@@ -399,8 +427,9 @@ where
             }
             if (publisher.send(resp_bytes.into()).await).is_err() {
                 tracing::error!(
-                    "Failed to publish complete final for stream {}",
-                    context.id()
+                    "Failed to publish complete final for stream: {} ; req id: {:?}",
+                    context.id(),
+                    current_request_id
                 );
                 if let Some(m) = self.metrics() {
                     m.error_counter
@@ -409,12 +438,12 @@ where
                 }
             }
             tracing::info!(
-                "***Step 5***: Successfully completed response stream: req id {:?}",
+                "***Step 5***: Successfully completed response stream: req id: {:?}",
                 current_request_id
             );
-        }else {
+        } else {
             tracing::info!(
-                "***Step 5.1***: Incomplete response stream ended: req id {:?}",
+                "***Step 5.1***: Incomplete response stream ended: req id: {:?}",
                 current_request_id
             );
         }
