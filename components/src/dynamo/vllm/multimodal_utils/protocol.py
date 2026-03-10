@@ -176,6 +176,8 @@ class MultiModalGroup(BaseModel):
 class vLLMMultimodalRequest(vLLMGenerateRequest):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     multimodal_inputs: List[MultiModalGroup] = Field(default_factory=list)
+    engine_prompt: Optional[PatchedTokensPrompt] = None
+    sampling_params: SamplingParams = Field(default_factory=SamplingParams)
 
 
 class VLLMNativeEncoderRequest(BaseModel):

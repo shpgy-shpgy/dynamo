@@ -31,6 +31,9 @@ class SupportedModels:
     QWEN_2_5_VL_7B = "Qwen/Qwen2.5-VL-7B-Instruct"
     QWEN_2_5_VL_3B = "Qwen/Qwen2.5-VL-3B-Instruct"
     LLAVA_NEXT_VIDEO_7B = "llava-hf/LLaVA-NeXT-Video-7B-hf"
+    SELF_QWEN_2_VL_2B = "Qwen2-VL-2B"
+    SELF_QWEN_3_5_VL_27B = "Qwen3.5-27B-FP8"
+    SELF_QWEN_3_5_VL = "Qwen3.5-27B"
 
 
 def normalize_model_name(model_name: str) -> str:
@@ -99,6 +102,8 @@ def is_model_supported(model_name: str, supported_model: str) -> bool:
     normalized_name = normalize_model_name(model_name).lower()
     normalized_supported = normalize_model_name(supported_model).lower()
 
+    print(f"Checking model support: {normalized_name} vs {normalized_supported}")
+
     return normalized_name == normalized_supported
 
 
@@ -107,6 +112,9 @@ QWEN_VL_MODELS = [
     SupportedModels.QWEN_2_VL_2B,
     SupportedModels.QWEN_2_5_VL_7B,
     SupportedModels.QWEN_2_5_VL_3B,
+    SupportedModels.SELF_QWEN_2_VL_2B,
+    SupportedModels.SELF_QWEN_3_5_VL_27B,
+    SupportedModels.SELF_QWEN_3_5_VL,
 ]
 
 

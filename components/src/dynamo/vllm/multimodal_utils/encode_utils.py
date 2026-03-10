@@ -104,7 +104,11 @@ def encode_image_embeddings(
             embeddings = projector(vision_outputs.last_hidden_state)
 
         elif is_qwen_vl_model(model_name):
-            embeddings = get_qwen_image_features(vision_encoder, image_embeds)
+            output = get_qwen_image_features(vision_encoder, image_embeds)
+            if hasattr(output, "last_hidden_state"):
+                embeddings = output.last_hidden_state
+            else:
+                embeddings = output
 
         else:
             raise NotImplementedError(f"Model not supported: {model_name}")

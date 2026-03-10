@@ -345,7 +345,8 @@ def setup_vllm_engine(config, stat_logger=None):
                 "Continuing without KV event consolidation. "
                 "Ensure 'kvbm' package is installed if this feature is needed."
             )
-    vllm_config.consolidator_endpoints = consolidator_endpoints
+    if consolidator_endpoints:
+        vllm_config.consolidator_endpoints = consolidator_endpoints
 
     factory = []
     if stat_logger:

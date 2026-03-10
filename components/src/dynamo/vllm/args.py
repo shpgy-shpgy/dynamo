@@ -579,19 +579,24 @@ def overwrite_args(config):
         "disable_log_stats": False,
     }
 
-    kv_transfer_config = create_kv_transfer_config(config)
-    if kv_transfer_config:
-        defaults["kv_transfer_config"] = kv_transfer_config
+    # kv_transfer_config = create_kv_transfer_config(config)
+    # if kv_transfer_config:
+    #     defaults["kv_transfer_config"] = kv_transfer_config
 
-    kv_cfg = create_kv_events_config(config)
-    defaults["kv_events_config"] = kv_cfg
+    # kv_cfg = create_kv_events_config(config)
+    # if kv_cfg:
+    #     logger.info(
+    #         "Setting defaults for KV events config to enable prefix caching support: "
+    #         f"{kv_cfg}"
+    #     )
+    #     defaults["kv_events_config"] = kv_cfg
     # Derive use_kv_events from whether kv_events_config is set AND enable_kv_cache_events is True
-    config.use_kv_events = kv_cfg is not None and kv_cfg.enable_kv_cache_events
+    # config.use_kv_events = kv_cfg is not None and kv_cfg.enable_kv_cache_events
 
-    logger.info(
-        f"Using kv_events_config for publishing vLLM kv events over zmq: {kv_cfg} "
-        f"(use_kv_events={config.use_kv_events})"
-    )
+    # logger.info(
+    #     f"Using kv_events_config for publishing vLLM kv events over zmq: {kv_cfg} "
+    #     f"(use_kv_events={config.use_kv_events})"
+    # )
 
     logger.debug("Setting Dynamo defaults for vLLM")
     for key, value in defaults.items():
